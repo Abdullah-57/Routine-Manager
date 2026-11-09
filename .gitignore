@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+build/
+.expo/
+mobile/android/
+mobile/ios/
+coverage/
+*.log
+.DS_Store
+eas-credentials/
