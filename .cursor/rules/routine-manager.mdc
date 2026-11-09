@@ -1,0 +1,30 @@
+---
+description: Routine Manager implementation gate — follow IMPLEMENTATION_PLAN.md feature order
+alwaysApply: true
+---
+
+# Routine Manager — build rules
+
+## Source of truth
+
+- Follow `IMPLEMENTATION_PLAN.md` strictly (user stories, architecture, schemas, and feature specs).
+- Implement **one atomic feature at a time** in checklist order.
+- **Do not start Feature N+1** until Feature N’s acceptance tests pass and the user confirms it works (or the feature’s DONE criteria are met).
+- When asked “what next?”, answer with the **first unchecked** feature in the master checklist — never jump ahead to calendar, AI, or deploy features.
+
+## Security
+
+- OpenAI API keys and other secrets stay on the **backend only** (env vars / host dashboard).
+- Never put secrets in the mobile app, `EXPO_PUBLIC_*` vars, commits, or client bundles.
+- Commit `.env.example` only; never commit `.env`.
+
+## Stack conventions
+
+- Mobile: Expo + Expo Router (file-based routing) + TypeScript.
+- Backend: Node.js + Express + MongoDB/Mongoose + OpenAI tool calling.
+- Prefer Expo docs / installed project skills (`expo-router`, `eas-update`, `vercel-react-native-skills`, etc.).
+- Android-first testing; keep iOS permissions and config ready for later publishing.
+
+## Teaching
+
+- The user is new to mobile development. When implementing, briefly explain mobile-specific concepts (Expo Go vs dev builds, Metro, EAS Update, notifications, etc.) in plain language — short, not lecture-length.

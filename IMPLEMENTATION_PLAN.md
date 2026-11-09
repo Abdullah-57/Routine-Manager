@@ -487,23 +487,46 @@ Example: `feature/0.3-backend-scaffold`
 
 Install these **before** coding features. They teach Cursor how to write better Expo/RN/AI code.
 
+### Project vs global (`-g`)
+
+- **Default (no `-g`) = project-level** — installs into this repo only. **Use this.**
+- **`-g` = global / user-level** — available in every project on your machine. Skip it unless you want these skills everywhere.
+
+Always run the commands from the project root: `c:\Users\Admin\OneDrive\Desktop\routine-manager-app`. Keep `-y` only to skip confirmation prompts (it is not “global”).
+
 ### Recommended installs (verified popularity)
 
-Run in PowerShell:
+Run in PowerShell **from the project root**:
 
 ```bash
 # 1) React Native + Expo performance & patterns (high signal, Vercel)
-npx skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-native-skills -g -y
+npx skills add https://github.com/vercel-labs/agent-skills --skill vercel-react-native-skills -y
 
 # 2) OpenAI docs helper (official)
-npx skills add https://github.com/openai/skills --skill openai-docs -g -y
+npx skills add https://github.com/openai/skills --skill openai-docs -y
 
 # 3) Vercel AI SDK patterns (useful mental model for tool calling even if we use openai SDK directly)
-npx skills add https://github.com/vercel/ai --skill ai-sdk -g -y
+npx skills add https://github.com/vercel/ai --skill ai-sdk -y
 
-# 4) Optional: Expo official feedback skill (lightweight; not a full build guide)
-npx skills add https://github.com/expo/skills --skill expo-skill-feedback -g -y
+# 4) Official Expo skills (project-relevant subset — NOT expo-skill-feedback; that name no longer exists)
+npx skills add https://github.com/expo/skills --skill expo-overview -y
+npx skills add https://github.com/expo/skills --skill expo-project-structure -y
+npx skills add https://github.com/expo/skills --skill expo-router -y
+npx skills add https://github.com/expo/skills --skill expo-ui -y
+npx skills add https://github.com/expo/skills --skill expo-data-fetching -y
+npx skills add https://github.com/expo/skills --skill expo-dev-client -y
+npx skills add https://github.com/expo/skills --skill eas-update -y
 ```
+
+**Optional later (not required for MVP):** `eas-app-stores`, `eas-workflows`, `expo-native-ui`, `expo-design-system`, `expo-animation`.
+
+**Tip:** Install several Expo skills in one shot with:
+
+```bash
+npx skills add https://github.com/expo/skills --skill expo-overview --skill expo-project-structure --skill expo-router --skill expo-ui --skill expo-data-fetching --skill expo-dev-client --skill eas-update -y
+```
+
+Verify with `npx skills list` (project skills). Use `npx skills list -g` only if you want to see global ones.
 
 ### Skills to skip / use cautiously
 
@@ -624,11 +647,11 @@ routine-manager-app/
 
 ### Global rule for every feature
 
-1. Read only this feature section.
+1. Read the entire IMPLEMENTATION_PLAN.md file to know exactlty what to do and have context of everything.
 2. Implement backend + frontend pieces listed (if both apply).
 3. Run the listed tests.
 4. Mark the feature **DONE** in this file’s checklist (or GitHub Issue).
-5. Commit on a feature branch / merge to `main`.
+5. Do not stage, commit or push the changes on a feature branch / merge to `main` on github yourself, the user will do that himself.
 6. **Only then** open the next feature.
 
 ---
@@ -686,9 +709,9 @@ routine-manager-app/
 
 **Implement:** Run the install commands in §8.
 
-**Expect:** `npx skills` list shows `vercel-react-native-skills`, `openai-docs`, `ai-sdk`.
+**Expect:** `npx skills list` shows `vercel-react-native-skills`, `openai-docs`, `ai-sdk`, plus Expo skills such as `expo-overview`, `expo-router`, `eas-update` (not `expo-skill-feedback` — that skill was removed from the Expo repo).
 
-**Test:** Ask Cursor: “What does the vercel-react-native-skills guidance say about lists?” — should answer from the skill.
+**Test:** Ask Cursor: “What does the vercel-react-native-skills guidance say about lists?” — should answer from the skill. Also confirm `npx skills list` includes `expo-router`.
 
 **DONE when:** Skills installed and loadable.
 
@@ -1374,9 +1397,9 @@ Assuming work starts from an empty folder mid-week:
 
 ## Master checklist (tick as you go)
 
-- [ ] 0.1 Cursor rule + gate
-- [ ] 0.2 GitHub + gitignore
-- [ ] 0.3 Skills installed
+- [x] 0.1 Cursor rule + gate
+- [x] 0.2 GitHub + gitignore
+- [x] 0.3 Skills installed
 - [ ] 0.4 Accounts/tooling verified
 - [ ] 1.1 Backend health
 - [ ] 1.2 Mongo + User model
