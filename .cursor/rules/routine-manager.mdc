@@ -27,4 +27,4 @@ alwaysApply: true
 
 ## Teaching
 
-- The user is new to mobile development. When implementing, briefly explain mobile-specific concepts (Expo Go vs dev builds, Metro, EAS Update, notifications, etc.) in plain language — short, not lecture-length.
+- The user is new to mobile development. When implementing, explain mobile-specific concepts (Expo Go vs dev builds, Metro, EAS Update, notifications, etc.) in simple language — Teach all of the concepts used while implementing and also what is being done in each code file that is added or edited, explain exactly what changes are being made and why, teach the concepts and the reasons as to why the code is being written the way it is (user is new to mobile). Basically whatever you are doing, teach me everything you are doing in simple words

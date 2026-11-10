@@ -543,7 +543,7 @@ File: `.cursor/rules/routine-manager.mdc` (or `AGENTS.md`) containing:
 - Never start next feature until current acceptance tests pass.
 - Never put OpenAI keys in the mobile app.
 - Prefer Expo docs patterns; use Expo Router file-based routing.
-- Teach briefly while implementing (user is new to mobile).
+- Teach all of the concepts used while implementing and also what is being done in each code file that is added or edited, explain exactly what changes are being made and why, teach the concepts and the reasons as to why the code is being written the way it is (user is new to mobile). Basically whatever you are doing, teach me everything you are doing in simple words.
 - Android-first testing; keep iOS permissions/config ready.
 
 ### How you will use skills day-to-day
@@ -810,10 +810,30 @@ Expect JSON `ok: true`.
 
 **Test (API):**
 
-```bash
-curl -X POST http://localhost:4000/auth/signup -H "Content-Type: application/json" -d "{\"email\":\"you@test.com\",\"password\":\"Password1!\",\"timezone\":\"Asia/Karachi\"}"
-curl -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" -d "{\"email\":\"you@test.com\",\"password\":\"Password1!\"}"
-curl http://localhost:4000/auth/me -H "Authorization: Bearer <TOKEN>"
+On **PowerShell (Windows)**, do **not** use bash-style `curl ... -d "{\"email\":...}"` — PowerShell mangles the escaped quotes and the API gets invalid JSON. Use these **single-line** `Invoke-RestMethod` commands (hashtable keys separated by `;`):
+
+```powershell
+# Run ONE command at a time (press Enter after each line)
+
+# 1) Signup (409 is OK if this email already exists — continue with login)
+$signup = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/signup -ContentType 'application/json' -Body (@{ email = 'you@test.com'; password = 'Password1!'; timezone = 'Asia/Karachi' } | ConvertTo-Json); $signup
+
+# 2) Login
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/login -ContentType 'application/json' -Body (@{ email = 'you@test.com'; password = 'Password1!' } | ConvertTo-Json); $login
+
+# 3) Me
+Invoke-RestMethod -Method Get -Uri http://localhost:4000/auth/me -Headers @{ Authorization = "Bearer $($login.token)" }
+
+# 4) Bad password → expect 401
+try { Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/login -ContentType 'application/json' -Body (@{ email = 'you@test.com'; password = 'WrongPass1!' } | ConvertTo-Json) } catch { $_.Exception.Response.StatusCode.value__ }
+```
+
+If you prefer `curl.exe`, pass JSON with **single-quoted** `-d` (no backslash escapes):
+
+```powershell
+curl.exe -X POST http://localhost:4000/auth/signup -H "Content-Type: application/json" -d '{"email":"you@test.com","password":"Password1!","timezone":"Asia/Karachi"}'
+curl.exe -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" -d '{"email":"you@test.com","password":"Password1!"}'
+curl.exe http://localhost:4000/auth/me -H "Authorization: Bearer <TOKEN>"
 ```
 
 **UI N/A** until mobile auth screens.
@@ -840,14 +860,35 @@ curl http://localhost:4000/auth/me -H "Authorization: Bearer <TOKEN>"
 
 **Expect:** Authenticated CRUD works; user A cannot read user B’s reminders.
 
-**Test (API):**
+**Test (API) — PowerShell, one command at a time:**
 
-1. Create reminder for tomorrow 7:00 in your timezone (send ISO).
-2. List with from/to covering that day — see 1 item.
-3. Patch title; delete; list empty.
-4. With second user token, cannot GET first user’s id (404).
+```powershell
+# Login as user A
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/login -ContentType 'application/json' -Body (@{ email = 'you@test.com'; password = 'Password1!' } | ConvertTo-Json); $token = $login.token
 
-**DONE when:** CRUD + isolation verified via curl/Postman.
+# Create reminder for tomorrow 07:00 (+03:00 example — adjust offset to your timezone)
+$created = Invoke-RestMethod -Method Post -Uri http://localhost:4000/reminders -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body (@{ title = 'Gym'; startAt = '2026-11-11T07:00:00+03:00'; timezone = 'Asia/Karachi' } | ConvertTo-Json); $created; $id = $created.reminder.id
+
+# List for that day — expect 1 item
+# Note: use %2B for '+' in querystrings (raw '+' becomes a space in URLs)
+Invoke-RestMethod -Method Get -Uri 'http://localhost:4000/reminders?from=2026-11-11T00:00:00%2B03:00&to=2026-11-11T23:59:59%2B03:00' -Headers @{ Authorization = "Bearer $token" }
+
+# Patch title
+Invoke-RestMethod -Method Patch -Uri "http://localhost:4000/reminders/$id" -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body (@{ title = 'Morning Gym' } | ConvertTo-Json)
+
+# Delete
+Invoke-RestMethod -Method Delete -Uri "http://localhost:4000/reminders/$id" -Headers @{ Authorization = "Bearer $token" }
+
+# List again — expect 0 items
+Invoke-RestMethod -Method Get -Uri 'http://localhost:4000/reminders?from=2026-11-11T00:00:00%2B03:00&to=2026-11-11T23:59:59%2B03:00' -Headers @{ Authorization = "Bearer $token" }
+
+# Isolation: create again, then GET with a different user's token → 404
+$created2 = Invoke-RestMethod -Method Post -Uri http://localhost:4000/reminders -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body (@{ title = 'Private'; startAt = '2026-11-11T07:00:00+03:00'; timezone = 'Asia/Karachi' } | ConvertTo-Json); $id2 = $created2.reminder.id
+
+$loginB = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/signup -ContentType 'application/json' -Body (@{ email = 'other14@test.com'; password = 'Password1!' } | ConvertTo-Json); try { Invoke-RestMethod -Method Get -Uri "http://localhost:4000/reminders/$id2" -Headers @{ Authorization = "Bearer $($loginB.token)" } } catch { $_.Exception.Response.StatusCode.value__ }
+```
+
+**DONE when:** CRUD + isolation verified via API.
 
 ---
 
@@ -1400,11 +1441,11 @@ Assuming work starts from an empty folder mid-week:
 - [x] 0.1 Cursor rule + gate
 - [x] 0.2 GitHub + gitignore
 - [x] 0.3 Skills installed
-- [ ] 0.4 Accounts/tooling verified
-- [ ] 1.1 Backend health
-- [ ] 1.2 Mongo + User model
-- [ ] 1.3 Auth JWT
-- [ ] 1.4 Reminder CRUD
+- [x] 0.4 Accounts/tooling verified
+- [x] 1.1 Backend health
+- [x] 1.2 Mongo + User model
+- [x] 1.3 Auth JWT
+- [x] 1.4 Reminder CRUD
 - [ ] 2.1 Expo shell
 - [ ] 2.2 API client ping
 - [ ] 2.3 Auth UI + SecureStore
