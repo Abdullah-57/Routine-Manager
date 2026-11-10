@@ -20,7 +20,7 @@
 8. [Cursor agent skills setup](#8-cursor-agent-skills-setup)
 9. [Environment & accounts checklist](#9-environment--accounts-checklist)
 10. [Monorepo project structure](#10-monorepo-project-structure)
-11. [Phased implementation (atomic features)](#11-phased-implementation-atomic-features)
+11. [Phased implementation (atomic features)](#11-phased-implementation-atomic-features) — Phase 2+ includes per-feature **Agent skills**
 12. [Testing & preview deployment strategy](#12-testing--preview-deployment-strategy)
 13. [Friday deadline reality check](#13-friday-deadline-reality-check)
 14. [Glossary for first-time mobile developers](#14-glossary-for-first-time-mobile-developers)
@@ -894,9 +894,35 @@ $loginB = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/signup 
 
 ### Phase 2 — Mobile shell
 
+> **Agent skills (Phase 2+):** For every feature below, the agent should load the listed project skills before implementing. Skills are already installed in this repo (`npx skills list`). Always also follow `.cursor/rules/routine-manager.mdc` and this plan.
+
+| Feature | Primary agent skills to use |
+|---|---|
+| 2.1 Expo scaffold + Router | `expo-overview`, `expo-project-structure`, `expo-router`, `vercel-react-native-skills` |
+| 2.2 API client + env | `expo-data-fetching`, `vercel-react-native-skills` |
+| 2.3 Auth + SecureStore | `expo-router`, `expo-ui`, `expo-data-fetching`, `vercel-react-native-skills` |
+| 3.1 OpenAI tools (backend) | `openai-docs`, `ai-sdk` |
+| 3.2 Plan-my-day text UI | `expo-ui`, `expo-data-fetching`, `vercel-react-native-skills` |
+| 4.1 Calendar agenda UI | `expo-ui`, `expo-router`, `expo-data-fetching`, `vercel-react-native-skills` |
+| 4.2 Reminder detail edit/delete | `expo-router`, `expo-ui`, `expo-data-fetching` |
+| 5.1 Whisper backend | `openai-docs` |
+| 5.2 Mic recorder UI | `expo-ui`, `expo-data-fetching`, `expo-dev-client` (if Expo Go blocks audio), `vercel-react-native-skills` |
+| 6.1 Local notifications | `expo-router`, `expo-dev-client` (if Expo Go is insufficient), `vercel-react-native-skills` |
+| 6.1b Development build | `expo-dev-client` |
+| 6.2 Push token register | `expo-dev-client`, `expo-data-fetching` |
+| 6.3 Remote push (optional) | `expo-dev-client` + Expo Push API docs *(no dedicated push skill installed)* |
+| 7.1 NL update/delete UI | `openai-docs`, `ai-sdk`, `expo-ui`, `expo-data-fetching` |
+| 8.1 Render Free deploy | *(no Expo skill — follow this plan + Render docs)* |
+| 8.2 EAS Update preview | `eas-update`, `eas-update-insights` (optional) |
+| 8.3 Android preview APK | `eas-app-stores`, `eas-workflows` (optional), `expo-dev-client` |
+| 9.1 Hardening UX | `expo-ui`, `vercel-react-native-skills`, `expo-animation` (optional polish) |
+| 9.2 Demo script E2E | `eas-update` (confirm preview channel), `eas-app-stores` (if using preview APK) |
+
 #### Feature 2.1 — Expo app scaffold + Expo Router
 
 **Goal:** Mobile project runs in Expo Go.
+
+**Agent skills:** `expo-overview`, `expo-project-structure`, `expo-router`, `vercel-react-native-skills`
 
 **Implement:**
 
@@ -924,6 +950,8 @@ $loginB = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/signup 
 
 **Goal:** Mobile can call backend health.
 
+**Agent skills:** `expo-data-fetching`, `vercel-react-native-skills`
+
 **Implement:**
 
 1. `EXPO_PUBLIC_API_URL` in `mobile/.env`.
@@ -948,6 +976,8 @@ $loginB = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/signup 
 #### Feature 2.3 — Auth screens + SecureStore session
 
 **Goal:** Sign up / log in from the phone; stay logged in.
+
+**Agent skills:** `expo-router`, `expo-ui`, `expo-data-fetching`, `vercel-react-native-skills`
 
 **Implement:**
 
@@ -975,6 +1005,8 @@ $loginB = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/signup 
 #### Feature 3.1 — OpenAI client + tool executors (backend)
 
 **Goal:** Backend can run tool loop without mobile.
+
+**Agent skills:** `openai-docs`, `ai-sdk` (tool-calling patterns; we still use the official `openai` SDK)
 
 **Implement:**
 
@@ -1005,6 +1037,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 **Goal:** Type routine → AI creates reminders → show confirmation.
 
+**Agent skills:** `expo-ui`, `expo-data-fetching`, `vercel-react-native-skills`
+
 **Implement:**
 
 1. Home screen: multiline TextInput, Submit button, loading state.
@@ -1032,6 +1066,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 **Goal:** Custom calendar showing reminders (not device OS calendar).
 
+**Agent skills:** `expo-ui`, `expo-router`, `expo-data-fetching`, `vercel-react-native-skills` (list performance)
+
 **Implement:**
 
 1. Add Calendar tab using `react-native-calendars` Agenda/ExpandableCalendar **or** a simple custom day list with date picker.
@@ -1055,6 +1091,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 #### Feature 4.2 — Reminder detail + manual edit/delete
 
 **Goal:** Non-AI management path.
+
+**Agent skills:** `expo-router`, `expo-ui`, `expo-data-fetching`
 
 **Implement:**
 
@@ -1080,6 +1118,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 **Goal:** Audio → text via OpenAI.
 
+**Agent skills:** `openai-docs` (audio transcription / Whisper)
+
 **Implement:**
 
 1. Extend `POST /routines/parse` to accept `multipart/form-data` with `audio` file **or** add `POST /routines/transcribe` then reuse parse.
@@ -1102,6 +1142,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 #### Feature 5.2 — Mobile mic recorder UI
 
 **Goal:** Speak routine inside the app.
+
+**Agent skills:** `expo-ui`, `expo-data-fetching`, `vercel-react-native-skills`; add `expo-dev-client` if Expo Go cannot access mic/native audio cleanly
 
 **Implement:**
 
@@ -1133,6 +1175,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 **Goal:** Phone alerts at reminder times without remote push yet.
 
+**Agent skills:** `expo-router` (notification → screen navigation), `vercel-react-native-skills`; use `expo-dev-client` if Expo Go notification limits block testing. *(No dedicated notifications skill in the installed set — follow Expo Notifications docs + this plan.)*
+
 **Implement:**
 
 1. Install `expo-notifications`; configure plugin in `app.json`.
@@ -1160,6 +1204,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 #### Feature 6.1b — Development build (only if Expo Go blocks notifications/mic)
 
+**Agent skills:** `expo-dev-client`
+
 **Implement:**
 
 1. `npx expo install expo-dev-client`
@@ -1173,6 +1219,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 #### Feature 6.2 — Register Expo push token with backend
 
 **Goal:** Server knows how to reach the device later.
+
+**Agent skills:** `expo-dev-client`, `expo-data-fetching` *(push token APIs — Expo Notifications docs; no dedicated push skill installed)*
 
 **Implement:**
 
@@ -1198,6 +1246,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 **Goal:** Backend can send a push via Expo Push API.
 
+**Agent skills:** `expo-dev-client` (for device testing). Backend push sender has no dedicated skill — follow Expo Push API docs + this plan.
+
 **Implement:**
 
 1. Service `sendExpoPush(tokens, title, body, data)`.
@@ -1218,6 +1268,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 #### Feature 7.1 — Conversational manage screen
 
 **Goal:** “Move gym to 8am” / “Cancel lunch” works via tools.
+
+**Agent skills:** `openai-docs`, `ai-sdk`, `expo-ui`, `expo-data-fetching`
 
 **Implement:**
 
@@ -1244,6 +1296,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 #### Feature 8.1 — Deploy backend to Render Free
 
 **Goal:** API on a public HTTPS URL (phone doesn’t need LAN), using Render’s free web service.
+
+**Agent skills:** *(none required — not an Expo feature; follow this plan + Render docs)*. Optionally keep `expo-data-fetching` in mind when updating the mobile API base URL afterward.
 
 **Why Render Free:** Closest free equivalent to “deploy backend like Vercel” for a normal Express server. No rewrite to serverless required. Catch: free instances **spin down after ~15 minutes** without traffic and take ~1 minute to wake on the next request (first mobile call after idle may be slow — that is expected).
 
@@ -1288,6 +1342,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 **Goal:** Ship JS updates like Vercel preview deployments.
 
+**Agent skills:** `eas-update`; optionally `eas-update-insights`
+
 **Implement:**
 
 1. `cd mobile && eas login && eas init`
@@ -1318,6 +1374,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 **Goal:** Installable build without Play Store (closest to “staging deploy”).
 
+**Agent skills:** `eas-app-stores`, `expo-dev-client`; optionally `eas-workflows`
+
 **Implement:**
 
 1. `eas build --profile preview --platform android`
@@ -1336,6 +1394,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 
 #### Feature 9.1 — Empty states, errors, loading
 
+**Agent skills:** `expo-ui`, `vercel-react-native-skills`; optionally `expo-animation` for subtle polish
+
 **Implement:** Friendly empties on calendar; disable double-submit; offline message.
 
 **Test:** Airplane mode → graceful error; retry works.
@@ -1345,6 +1405,8 @@ Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone)
 ---
 
 #### Feature 9.2 — End-to-end demo script freeze
+
+**Agent skills:** `eas-update` (verify preview channel); `eas-app-stores` if demoing from a preview APK
 
 **Implement:** Write `DEMO_SCRIPT.md` with exact phrases and times for the Friday demo.
 
@@ -1446,9 +1508,9 @@ Assuming work starts from an empty folder mid-week:
 - [x] 1.2 Mongo + User model
 - [x] 1.3 Auth JWT
 - [x] 1.4 Reminder CRUD
-- [ ] 2.1 Expo shell
-- [ ] 2.2 API client ping
-- [ ] 2.3 Auth UI + SecureStore
+- [x] 2.1 Expo shell
+- [x] 2.2 API client ping
+- [x] 2.3 Auth UI + SecureStore
 - [ ] 3.1 OpenAI tools backend
 - [ ] 3.2 Text composer UI
 - [ ] 4.1 Calendar UI
