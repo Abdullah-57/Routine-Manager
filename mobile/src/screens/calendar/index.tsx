@@ -117,8 +117,11 @@ export function CalendarScreen() {
   const markedDates = useMemo(() => {
     const marks: Record<string, boolean> = {};
     for (const item of monthReminders) {
-      // Always bucket by the viewer's timezone so marks match the agenda.
-      const key = dateKeyInTimezone(item.startAt, timezone);
+      // Same TZ as Home/detail: each reminder's stored timezone (fallback: account/device).
+      const key = dateKeyInTimezone(
+        item.startAt,
+        item.timezone || timezone,
+      );
       marks[key] = true;
     }
     return marks;
@@ -127,7 +130,11 @@ export function CalendarScreen() {
   const dayReminders = useMemo(() => {
     // Applies to ALL reminders (old and new): earliest startAt at top.
     return monthReminders
-      .filter((item) => dateKeyInTimezone(item.startAt, timezone) === selectedDate)
+      .filter(
+        (item) =>
+          dateKeyInTimezone(item.startAt, item.timezone || timezone) ===
+          selectedDate,
+      )
       .slice()
       .sort(compareRemindersByStartAscending);
   }, [monthReminders, selectedDate, timezone]);
@@ -222,17 +229,21 @@ export function CalendarScreen() {
           </Text>
         )
       }
-      renderItem={({ item }) => (
-        <AgendaRow
-          id={item.id}
-          title={item.title}
-          notes={item.notes}
-          status={item.status}
-          // Same timezone as sort/filter so on-screen times match list order.
-          timeLabel={formatTimeOnly(item.startAt, timezone)}
-          onPressId={onPressReminder}
-        />
-      )}
+      renderItem={({ item }) => {
+        // Must match Home: format in the reminder's own timezone, not only account/device.
+        // Otherwise 15:00 Asia/Karachi can show as 13:00 on a UTC+3 phone.
+        const reminderTz = item.timezone || timezone;
+        return (
+          <AgendaRow
+            id={item.id}
+            title={item.title}
+            notes={item.notes}
+            status={item.status}
+            timeLabel={formatTimeOnly(item.startAt, reminderTz)}
+            onPressId={onPressReminder}
+          />
+        );
+      }}
     />
   );
 }

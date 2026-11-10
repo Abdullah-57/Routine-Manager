@@ -62,11 +62,15 @@ export function ReminderDetailScreen() {
   const savingRef = useRef(false);
   const deletingRef = useRef(false);
 
-  const timezone = user?.timezone || getDeviceTimezone();
+  const accountTimezone = user?.timezone || getDeviceTimezone();
+  // Prefer the reminder's stored TZ so edit/preview match Home + calendar agenda.
+  const timezone =
+    (load.status === "ready" ? load.reminder.timezone : undefined) ||
+    accountTimezone;
 
   const applyReminderToForm = useCallback(
     (reminder: ReminderSummary) => {
-      const tz = reminder.timezone || timezone;
+      const tz = reminder.timezone || accountTimezone;
       setTitle(reminder.title);
       setNotes(reminder.notes ?? "");
       setStatus(
@@ -79,7 +83,7 @@ export function ReminderDetailScreen() {
         reminder.endAt ? toLocalDateTimeInput(reminder.endAt, tz) : "",
       );
     },
-    [timezone],
+    [accountTimezone],
   );
 
   const loadReminder = useCallback(async () => {
