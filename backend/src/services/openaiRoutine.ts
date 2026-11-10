@@ -111,10 +111,12 @@ export async function parseRoutineWithTools(input: {
   userId: string;
   text: string;
   timezone: string;
+  inputType?: "text" | "audio";
 }): Promise<ParseRoutineResult> {
   const client = getOpenAIClient();
   const model = getModel();
   const now = new Date();
+  const inputType = input.inputType ?? "text";
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(input.timezone, now) },
@@ -187,7 +189,7 @@ export async function parseRoutineWithTools(input: {
 
   const session = await AiSession.create({
     userId: input.userId,
-    inputType: "text",
+    inputType,
     rawTranscript: input.text,
     model,
     toolCalls,

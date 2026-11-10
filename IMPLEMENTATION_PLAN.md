@@ -1166,9 +1166,9 @@ $from = [Uri]::EscapeDataString('2020-01-01T00:00:00+05:00'); $to = [Uri]::Escap
 **Implement:**
 
 1. Extend `POST /routines/parse` to accept `multipart/form-data` with `audio` file **or** add `POST /routines/transcribe` then reuse parse.
-2. Use OpenAI Whisper (`whisper-1` or current audio transcription model).
-3. Feed transcript into existing tool loop.
-4. Return `transcript` so UI can show what was heard.
+2. Use OpenAI Audio Transcriptions with current recommended model `gpt-transcribe` (override via `OPENAI_TRANSCRIBE_MODEL`; `whisper-1` still works until ~2027 shutdown).
+3. Feed transcript into existing tool loop (`inputType: "audio"`).
+4. Return `transcript` so UI can show what was heard. Also expose `POST /routines/transcribe` for audio-only debugging.
 
 **Expect:** Uploading a short m4a/wav creates reminders.
 
@@ -1557,8 +1557,8 @@ Assuming work starts from an empty folder mid-week:
 - [x] 3.1 OpenAI tools backend
 - [x] 3.2 Text composer UI
 - [x] 4.1 Calendar UI
-- [ ] 4.2 Detail edit/delete
-- [ ] 5.1 Whisper backend
+- [x] 4.2 Detail edit/delete
+- [x] 5.1 Whisper backend
 - [ ] 5.2 Mic UI
 - [ ] 6.1 Local notifications
 - [ ] 6.1b Dev build (if needed)
