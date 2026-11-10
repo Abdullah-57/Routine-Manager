@@ -70,6 +70,43 @@ export async function listRemindersForUser(
   return reminders.map(toReminderDto);
 }
 
+/** Calendar date (YYYY-MM-DD) + clock time (HH:mm) in the given timezone. */
+function startDateAndTimeInTimezone(
+  startAt: Date,
+  timezone: string,
+): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(startAt);
+
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    time: `${get("hour")}:${get("minute")}`,
+  };
+}
+
+/**
+ * Duplicate = same title (case-insensitive) + same start date + same start time
+ * (to the minute) in the user's timezone.
+ */
+function reminderDedupeKey(
+  title: string,
+  startAt: Date,
+  timezone: string,
+): string {
+  const { date, time } = startDateAndTimeInTimezone(startAt, timezone);
+  return `${title.trim().toLowerCase()}|${date}|${time}`;
+}
+
 export async function createRemindersForUser(
   userId: string,
   timezone: string,
@@ -79,8 +116,11 @@ export async function createRemindersForUser(
     startAtISO: string;
     endAtISO?: string;
   }>,
-): Promise<ReminderDto[]> {
-  const docs = items.map((item) => {
+): Promise<{
+  created: ReminderDto[];
+  skippedDuplicates: Array<{ title: string; startAtISO: string }>;
+}> {
+  const prepared = items.map((item) => {
     const startAt = parseDate(item.startAtISO);
     const endAt = item.endAtISO ? parseDate(item.endAtISO) : undefined;
     if (endAt && endAt < startAt) {
@@ -96,11 +136,70 @@ export async function createRemindersForUser(
       timezone,
       status: "scheduled" as const,
       source: "ai" as const,
+      startAtISO: item.startAtISO,
     };
   });
 
-  const created = await Reminder.insertMany(docs);
-  return created.map(toReminderDto);
+  // Drop duplicates inside the same AI batch (same title + date + time).
+  const seenInBatch = new Set<string>();
+  const uniqueInBatch = prepared.filter((item) => {
+    const key = reminderDedupeKey(item.title, item.startAt, timezone);
+    if (seenInBatch.has(key)) return false;
+    seenInBatch.add(key);
+    return true;
+  });
+
+  let existingKeys = new Set<string>();
+
+  if (uniqueInBatch.length > 0) {
+    const startTimes = uniqueInBatch.map((item) => item.startAt.getTime());
+    const windowStart = new Date(Math.min(...startTimes) - 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(Math.max(...startTimes) + 24 * 60 * 60 * 1000);
+
+    // Pull nearby reminders, then compare by title + local date + local time.
+    const existing = await Reminder.find({
+      userId,
+      startAt: { $gte: windowStart, $lte: windowEnd },
+      status: { $ne: "cancelled" },
+    }).select("title startAt timezone");
+
+    existingKeys = new Set(
+      existing.map((item) =>
+        reminderDedupeKey(
+          item.title,
+          item.startAt,
+          item.timezone || timezone,
+        ),
+      ),
+    );
+  }
+
+  const skippedDuplicates: Array<{ title: string; startAtISO: string }> = [];
+  const docsToInsert = uniqueInBatch.filter((item) => {
+    const key = reminderDedupeKey(item.title, item.startAt, timezone);
+    if (existingKeys.has(key)) {
+      skippedDuplicates.push({
+        title: item.title,
+        startAtISO: item.startAtISO,
+      });
+      return false;
+    }
+    existingKeys.add(key);
+    return true;
+  });
+
+  if (docsToInsert.length === 0) {
+    return { created: [], skippedDuplicates };
+  }
+
+  const created = await Reminder.insertMany(
+    docsToInsert.map(({ startAtISO: _startAtISO, ...doc }) => doc),
+  );
+
+  return {
+    created: created.map(toReminderDto),
+    skippedDuplicates,
+  };
 }
 
 export async function updateReminderForUser(

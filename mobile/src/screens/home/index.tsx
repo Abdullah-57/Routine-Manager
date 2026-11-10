@@ -1,13 +1,19 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { ApiError, pingHealth } from "@/api/client";
+import {
+  listReminders,
+  parseRoutine,
+  type ReminderSummary,
+} from "@/api/routines";
 import { useAuth } from "@/auth/AuthContext";
 
 type PingState =
@@ -16,10 +22,180 @@ type PingState =
   | { status: "success"; message: string }
   | { status: "error"; message: string };
 
+type PlanState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "success"; message: string }
+  | { status: "error"; message: string };
+
+const RECENT_PREVIEW_COUNT = 5;
+
+const timeFormatter = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function formatReminderTime(iso: string, timezone: string) {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: timezone,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return timeFormatter.format(new Date(iso));
+  }
+}
+
+function getDeviceTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function sortNewestFirst(items: ReminderSummary[]) {
+  return [...items].sort((a, b) => {
+    const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    if (bCreated !== aCreated) return bCreated - aCreated;
+    return new Date(b.startAt).getTime() - new Date(a.startAt).getTime();
+  });
+}
+
+function ReminderRow({
+  title,
+  timeLabel,
+  isNew,
+}: {
+  title: string;
+  timeLabel: string;
+  isNew?: boolean;
+}) {
+  return (
+    <View style={[styles.reminderRow, isNew ? styles.reminderRowNew : null]}>
+      <View style={styles.reminderHeader}>
+        <Text style={styles.reminderTitle}>{title}</Text>
+        {isNew ? <Text style={styles.newBadge}>New</Text> : null}
+      </View>
+      <Text style={styles.reminderTime}>{timeLabel}</Text>
+    </View>
+  );
+}
+
 export function HomeScreen() {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
+  const [planText, setPlanText] = useState("");
+  const [plan, setPlan] = useState<PlanState>({ status: "idle" });
+  const [allReminders, setAllReminders] = useState<ReminderSummary[]>([]);
+  const [justCreatedIds, setJustCreatedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [showAllReminders, setShowAllReminders] = useState(false);
+  const [isLoadingReminders, setIsLoadingReminders] = useState(false);
+  const [remindersError, setRemindersError] = useState<string | null>(null);
   const [ping, setPing] = useState<PingState>({ status: "idle" });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const isSubmittingRef = useRef(false);
+
+  const timezone = useMemo(
+    () => user?.timezone || getDeviceTimezone(),
+    [user?.timezone],
+  );
+
+  const sortedReminders = useMemo(
+    () => sortNewestFirst(allReminders),
+    [allReminders],
+  );
+
+  const visibleReminders = showAllReminders
+    ? sortedReminders
+    : sortedReminders.slice(0, RECENT_PREVIEW_COUNT);
+
+  const canShowMore = sortedReminders.length > RECENT_PREVIEW_COUNT;
+
+  const refreshReminders = useCallback(async (authToken: string) => {
+    setIsLoadingReminders(true);
+    setRemindersError(null);
+    try {
+      const { reminders } = await listReminders(authToken);
+      setAllReminders(reminders);
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Could not load reminders.";
+      setRemindersError(message);
+    } finally {
+      setIsLoadingReminders(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    void refreshReminders(token);
+  }, [token, refreshReminders]);
+
+  async function handlePlanSubmit() {
+    if (isSubmittingRef.current) return;
+
+    const text = planText.trim();
+    if (!text) {
+      setPlan({
+        status: "error",
+        message: "Type a plan first — empty text cannot be submitted.",
+      });
+      return;
+    }
+
+    if (!token) {
+      setPlan({
+        status: "error",
+        message: "You are not signed in. Log in again, then retry.",
+      });
+      return;
+    }
+
+    isSubmittingRef.current = true;
+    setPlan({ status: "loading" });
+
+    try {
+      const result = await parseRoutine(token, { text, timezone });
+      const createdIds = new Set(result.created.map((item) => item.id));
+      setJustCreatedIds(createdIds);
+
+      const createdCount = result.created.length;
+      const baseMessage = result.assistantMessage || "Reminders processed.";
+      const successMessage =
+        createdCount === 0
+          ? `${baseMessage}\n\nNo new reminders were saved — matching ones already existed.`
+          : baseMessage;
+
+      setPlan({
+        status: "success",
+        message: successMessage,
+      });
+      setPlanText("");
+      setShowAllReminders(false);
+
+      await refreshReminders(token);
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Could not plan your day. Check the network and try again.";
+      setPlan({ status: "error", message });
+    } finally {
+      isSubmittingRef.current = false;
+    }
+  }
 
   async function handlePing() {
     if (ping.status === "loading") return;
@@ -54,29 +230,165 @@ export function HomeScreen() {
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={styles.content}
     >
       <View style={styles.section}>
-        <Text style={styles.title}>Home</Text>
+        <Text style={styles.title}>Plan my day</Text>
         <Text style={styles.subtitle}>
-          Signed in as {user?.email ?? "your account"}.
+          Signed in as {user?.email ?? "your account"}. Type what you want to do;
+          the backend AI turns it into reminders.
         </Text>
+        <Text style={styles.meta}>Timezone: {timezone}</Text>
       </View>
+
+      <View style={styles.composer}>
+        <Text style={styles.label}>Today&apos;s plan</Text>
+        <TextInput
+          accessibilityLabel="Plan text"
+          multiline
+          placeholder="Today: deep work 9–11, call mom at 5pm, stretch at 8pm"
+          placeholderTextColor="#a3a3a3"
+          style={styles.planInput}
+          textAlignVertical="top"
+          value={planText}
+          editable={plan.status !== "loading"}
+          onChangeText={(next) => {
+            setPlanText(next);
+            if (plan.status === "error") {
+              setPlan({ status: "idle" });
+            }
+          }}
+        />
+
+        <Pressable
+          accessibilityRole="button"
+          disabled={plan.status === "loading"}
+          onPress={() => {
+            void handlePlanSubmit();
+          }}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed ? styles.buttonPressed : null,
+            plan.status === "loading" ? styles.buttonDisabled : null,
+          ]}
+        >
+          {plan.status === "loading" ? (
+            <ActivityIndicator color="#ffffff" />
+          ) : (
+            <Text style={styles.primaryButtonLabel}>Submit plan</Text>
+          )}
+        </Pressable>
+
+        {plan.status === "loading" ? (
+          <View style={styles.loadingRow}>
+            <Text style={styles.loadingText}>
+              Talking to the AI and saving reminders…
+            </Text>
+          </View>
+        ) : null}
+
+        {plan.status === "error" ? (
+          <View style={[styles.result, styles.resultError]}>
+            <Text style={styles.resultLabel}>Error</Text>
+            <Text style={styles.resultBody}>{plan.message}</Text>
+          </View>
+        ) : null}
+
+        {plan.status === "success" ? (
+          <View style={[styles.result, styles.resultSuccess]}>
+            <Text style={styles.resultLabel}>Saved</Text>
+            <Text style={styles.resultBody}>{plan.message}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>
+          {showAllReminders
+            ? `All reminders (${sortedReminders.length})`
+            : `Recent reminders (${Math.min(RECENT_PREVIEW_COUNT, sortedReminders.length)} of ${sortedReminders.length})`}
+        </Text>
+
+        {isLoadingReminders && sortedReminders.length === 0 ? (
+          <ActivityIndicator color="#2563eb" />
+        ) : null}
+
+        {remindersError ? (
+          <View style={[styles.result, styles.resultError]}>
+            <Text style={styles.resultLabel}>Could not load reminders</Text>
+            <Text style={styles.resultBody}>{remindersError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                if (token) void refreshReminders(token);
+              }}
+            >
+              <Text style={styles.linkLabel}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {!remindersError && sortedReminders.length === 0 && !isLoadingReminders ? (
+          <Text style={styles.emptyText}>
+            No reminders yet. Submit a plan above to create some.
+          </Text>
+        ) : null}
+
+        <View style={styles.reminderList}>
+          {visibleReminders.map((item) => {
+            const startLabel = formatReminderTime(
+              item.startAt,
+              item.timezone || timezone,
+            );
+            const endLabel = item.endAt
+              ? ` → ${formatReminderTime(item.endAt, item.timezone || timezone)}`
+              : "";
+            return (
+              <ReminderRow
+                key={item.id}
+                title={item.title}
+                timeLabel={`${startLabel}${endLabel}`}
+                isNew={justCreatedIds.has(item.id)}
+              />
+            );
+          })}
+        </View>
+
+        {canShowMore ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setShowAllReminders((prev) => !prev)}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed ? styles.buttonPressed : null,
+            ]}
+          >
+            <Text style={styles.secondaryButtonLabel}>
+              {showAllReminders
+                ? "Show less"
+                : `Show more (${sortedReminders.length - RECENT_PREVIEW_COUNT} more)`}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View style={styles.divider} />
 
       <Pressable
         accessibilityRole="button"
         disabled={ping.status === "loading"}
         onPress={handlePing}
         style={({ pressed }) => [
-          styles.button,
+          styles.secondaryButton,
           pressed ? styles.buttonPressed : null,
           ping.status === "loading" ? styles.buttonDisabled : null,
         ]}
       >
         {ping.status === "loading" ? (
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color="#2563eb" />
         ) : (
-          <Text style={styles.buttonLabel}>Ping API</Text>
+          <Text style={styles.secondaryButtonLabel}>Ping API</Text>
         )}
       </Pressable>
 
@@ -117,20 +429,49 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
     gap: 16,
+    paddingBottom: 40,
   },
   section: {
     gap: 8,
   },
+  composer: {
+    gap: 12,
+  },
   title: {
     fontSize: 28,
     fontWeight: "700",
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "600",
   },
   subtitle: {
     fontSize: 16,
     lineHeight: 22,
     color: "#525252",
   },
-  button: {
+  meta: {
+    fontSize: 13,
+    color: "#737373",
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#404040",
+  },
+  planInput: {
+    minHeight: 120,
+    borderWidth: 1,
+    borderColor: "#d4d4d4",
+    borderRadius: 12,
+    borderCurve: "continuous",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    lineHeight: 22,
+    backgroundColor: "#ffffff",
+  },
+  primaryButton: {
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#2563eb",
@@ -138,6 +479,67 @@ const styles = StyleSheet.create({
     borderCurve: "continuous",
     minHeight: 48,
     paddingHorizontal: 16,
+  },
+  primaryButtonLabel: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  loadingText: {
+    color: "#525252",
+    flex: 1,
+  },
+  reminderList: {
+    gap: 8,
+  },
+  reminderRow: {
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+    borderRadius: 12,
+    borderCurve: "continuous",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+    backgroundColor: "#fafafa",
+  },
+  reminderRowNew: {
+    borderColor: "#86efac",
+    backgroundColor: "#f0fdf4",
+  },
+  reminderHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  reminderTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#171717",
+    flex: 1,
+  },
+  newBadge: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#15803d",
+  },
+  reminderTime: {
+    fontSize: 14,
+    color: "#525252",
+  },
+  emptyText: {
+    color: "#737373",
+    lineHeight: 20,
+  },
+  linkLabel: {
+    marginTop: 8,
+    color: "#2563eb",
+    fontWeight: "600",
   },
   secondaryButton: {
     alignItems: "center",
@@ -154,11 +556,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.7,
-  },
-  buttonLabel: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
   },
   secondaryButtonLabel: {
     color: "#2563eb",
@@ -183,5 +580,10 @@ const styles = StyleSheet.create({
   resultBody: {
     color: "#404040",
     lineHeight: 20,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#e5e5e5",
+    marginVertical: 4,
   },
 });

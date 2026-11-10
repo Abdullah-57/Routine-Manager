@@ -124,13 +124,20 @@ async function executeCreateReminders(args: unknown, ctx: ToolContext) {
     }>;
   };
 
-  const created = await createRemindersForUser(
+  const { created, skippedDuplicates } = await createRemindersForUser(
     ctx.userId,
     ctx.timezone,
     payload.reminders ?? [],
   );
   ctx.affect.created.push(...created);
-  return { created };
+  return {
+    created,
+    skippedDuplicates,
+    message:
+      skippedDuplicates.length > 0
+        ? `Skipped ${skippedDuplicates.length} duplicate reminder(s) with the same title, start date, and start time.`
+        : undefined,
+  };
 }
 
 async function executeUpdateReminder(args: unknown, ctx: ToolContext) {
