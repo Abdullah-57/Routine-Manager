@@ -1556,7 +1556,7 @@ Assuming work starts from an empty folder mid-week:
 - [x] 2.3 Auth UI + SecureStore
 - [x] 3.1 OpenAI tools backend
 - [x] 3.2 Text composer UI
-- [ ] 4.1 Calendar UI
+- [x] 4.1 Calendar UI
 - [ ] 4.2 Detail edit/delete
 - [ ] 5.1 Whisper backend
 - [ ] 5.2 Mic UI

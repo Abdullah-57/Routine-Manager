@@ -126,3 +126,58 @@ export function compareRemindersByStartAscending(
   if (!aValid && bValid) return 1;
   return a.title.localeCompare(b.title);
 }
+
+function formatOffset(offsetMinutes: number): string {
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMinutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${sign}${hh}:${mm}`;
+}
+
+/** Editable local value: YYYY-MM-DDTHH:mm in the given timezone. */
+export function toLocalDateTimeInput(iso: string, timezone: string): string {
+  const date = new Date(iso);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
+
+/**
+ * Convert YYYY-MM-DDTHH:mm (or with seconds) in a timezone to ISO with offset.
+ * Returns null if the input is invalid.
+ */
+export function fromLocalDateTimeInput(
+  value: string,
+  timezone: string,
+): string | null {
+  const trimmed = value.trim();
+  const match = trimmed.match(
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (!match) return null;
+
+  const dateKey = match[1];
+  const hour = match[2];
+  const minute = match[3];
+  const second = match[4] ?? "00";
+  const probe = new Date(`${dateKey}T${hour}:${minute}:${second}.000Z`);
+  if (Number.isNaN(probe.getTime())) return null;
+
+  const offset = formatOffset(getTimeZoneOffsetMinutes(timezone, probe));
+  const iso = `${dateKey}T${hour}:${minute}:${second}${offset}`;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return iso;
+}

@@ -13,6 +13,7 @@ import { ApiError } from "@/api/client";
 import { listReminders, type ReminderSummary } from "@/api/reminders";
 import { useAuth } from "@/auth/AuthContext";
 import { MonthCalendar } from "@/components/month-calendar";
+import { StatusBadge } from "@/components/status-badge";
 import {
   compareRemindersByStartAscending,
   dateKeyInTimezone,
@@ -40,12 +41,14 @@ function AgendaRow({
   title,
   timeLabel,
   notes,
+  status,
   onPressId,
 }: {
   id: string;
   title: string;
   timeLabel: string;
   notes: string;
+  status: string;
   onPressId: (id: string) => void;
 }) {
   return (
@@ -59,7 +62,10 @@ function AgendaRow({
     >
       <Text style={styles.agendaTime}>{timeLabel}</Text>
       <View style={styles.agendaBody}>
-        <Text style={styles.agendaTitle}>{title}</Text>
+        <View style={styles.agendaTitleRow}>
+          <Text style={styles.agendaTitle}>{title}</Text>
+          <StatusBadge status={status} />
+        </View>
         {notes ? <Text style={styles.agendaNotes}>{notes}</Text> : null}
       </View>
     </Pressable>
@@ -128,7 +134,10 @@ export function CalendarScreen() {
 
   const onPressReminder = useCallback(
     (id: string) => {
-      push(`/reminder/${id}`);
+      push({
+        pathname: "/reminder/[id]",
+        params: { id },
+      });
     },
     [push],
   );
@@ -218,6 +227,7 @@ export function CalendarScreen() {
           id={item.id}
           title={item.title}
           notes={item.notes}
+          status={item.status}
           // Same timezone as sort/filter so on-screen times match list order.
           timeLabel={formatTimeOnly(item.startAt, timezone)}
           onPressId={onPressReminder}
@@ -279,7 +289,14 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
+  agendaTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
   agendaTitle: {
+    flex: 1,
     fontSize: 16,
     fontWeight: "600",
     color: "#171717",

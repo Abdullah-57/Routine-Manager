@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -15,6 +16,7 @@ import {
   type ReminderSummary,
 } from "@/api/routines";
 import { useAuth } from "@/auth/AuthContext";
+import { StatusBadge } from "@/components/status-badge";
 
 type PingState =
   | { status: "idle" }
@@ -73,10 +75,12 @@ function sortNewestFirst(items: ReminderSummary[]) {
 function ReminderRow({
   title,
   timeLabel,
+  status,
   isNew,
 }: {
   title: string;
   timeLabel: string;
+  status: string;
   isNew?: boolean;
 }) {
   return (
@@ -85,7 +89,10 @@ function ReminderRow({
         <Text style={styles.reminderTitle}>{title}</Text>
         {isNew ? <Text style={styles.newBadge}>New</Text> : null}
       </View>
-      <Text style={styles.reminderTime}>{timeLabel}</Text>
+      <View style={styles.reminderMetaRow}>
+        <StatusBadge status={status} />
+        <Text style={styles.reminderTime}>{timeLabel}</Text>
+      </View>
     </View>
   );
 }
@@ -138,10 +145,12 @@ export function HomeScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!token) return;
-    void refreshReminders(token);
-  }, [token, refreshReminders]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      void refreshReminders(token);
+    }, [token, refreshReminders]),
+  );
 
   async function handlePlanSubmit() {
     if (isSubmittingRef.current) return;
@@ -345,12 +354,13 @@ export function HomeScreen() {
               ? ` → ${formatReminderTime(item.endAt, item.timezone || timezone)}`
               : "";
             return (
-              <ReminderRow
-                key={item.id}
-                title={item.title}
-                timeLabel={`${startLabel}${endLabel}`}
-                isNew={justCreatedIds.has(item.id)}
-              />
+                <ReminderRow
+                  key={item.id}
+                  title={item.title}
+                  timeLabel={`${startLabel}${endLabel}`}
+                  status={item.status}
+                  isNew={justCreatedIds.has(item.id)}
+                />
             );
           })}
         </View>
@@ -528,9 +538,16 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#15803d",
   },
+  reminderMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
   reminderTime: {
     fontSize: 14,
     color: "#525252",
+    flexShrink: 1,
   },
   emptyText: {
     color: "#737373",
