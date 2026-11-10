@@ -1018,16 +1018,59 @@ $loginB = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/signup 
 
 **Expect:** Natural language creates DB reminders.
 
-**Test (API):**
+**Test (API) — PowerShell (Windows):**
 
-```bash
-curl -X POST http://localhost:4000/routines/parse \
-  -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d "{\"text\":\"Tomorrow gym at 7am, team standup at 10:30am, lunch at 1pm\",\"timezone\":\"Asia/Karachi\"}"
+Run **one command per line** (do not paste comments and commands onto a single line; `#` comments out everything after it).
+
+```powershell
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:4000/auth/login -ContentType 'application/json' -Body (@{ email = 'test1@gmail.com'; password = '12345678' } | ConvertTo-Json)
 ```
 
-Then `GET /reminders?from=&to=` → 3 reminders with correct times (± timezone).
+```powershell
+$token = $login.token
+```
+
+```powershell
+Write-Output $token
+```
+
+```powershell
+$body = @{ text = 'Tomorrow gym at 7am, team standup at 10:30am, lunch at 1pm'; timezone = 'Asia/Karachi' } | ConvertTo-Json
+```
+
+```powershell
+$result = Invoke-RestMethod -Method Post -Uri http://localhost:4000/routines/parse -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body $body
+```
+
+```powershell
+$result | ConvertTo-Json -Depth 6
+```
+
+```powershell
+Write-Output "created_count=$($result.created.Count)"
+```
+
+Optional second phrasing (same `$token`):
+
+```powershell
+$body2 = @{ text = 'Plan for today: deep work from 9 to 11, call mom at 5pm, stretch at 8pm'; timezone = 'Asia/Karachi' } | ConvertTo-Json
+```
+
+```powershell
+$result2 = Invoke-RestMethod -Method Post -Uri http://localhost:4000/routines/parse -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body $body2
+```
+
+```powershell
+Write-Output "created_count=$($result2.created.Count)"
+```
+
+Then list reminders to confirm times (± timezone):
+
+```powershell
+$from = [Uri]::EscapeDataString('2020-01-01T00:00:00+05:00'); $to = [Uri]::EscapeDataString('2030-01-01T00:00:00+05:00'); Invoke-RestMethod -Uri "http://localhost:4000/reminders?from=$from&to=$to" -Headers @{ Authorization = "Bearer $token" } | ConvertTo-Json -Depth 6
+```
+
+**Note:** Expo Go login does **not** set `$token` in PowerShell — always login/signup in the terminal first. Prefer `Invoke-RestMethod` over bash-style `curl` on Windows.
 
 **DONE when:** At least 2 different phrasings parse into correct reminders.
 
@@ -1511,7 +1554,7 @@ Assuming work starts from an empty folder mid-week:
 - [x] 2.1 Expo shell
 - [x] 2.2 API client ping
 - [x] 2.3 Auth UI + SecureStore
-- [ ] 3.1 OpenAI tools backend
+- [x] 3.1 OpenAI tools backend
 - [ ] 3.2 Text composer UI
 - [ ] 4.1 Calendar UI
 - [ ] 4.2 Detail edit/delete

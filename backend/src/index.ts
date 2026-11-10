@@ -4,6 +4,7 @@ import express from "express";
 import { connectDb } from "./db/connect";
 import { authRouter } from "./routes/auth";
 import { remindersRouter } from "./routes/reminders";
+import { routinesRouter } from "./routes/routines";
 
 const app = express();
 const port = Number(process.env.PORT) || 4000;
@@ -20,6 +21,7 @@ app.get("/health", (_req, res) => {
 
 app.use("/auth", authRouter);
 app.use("/reminders", remindersRouter);
+app.use("/routines", routinesRouter);
 
 async function start() {
   if (!process.env.JWT_SECRET) {
