@@ -1,25 +1,14 @@
 import { apiFetch } from "@/api/client";
+import type { ReminderSummary as ReminderSummaryType } from "@/api/reminders";
 
-export type ReminderSummary = {
-  id: string;
-  userId: string;
-  title: string;
-  notes: string;
-  startAt: string;
-  endAt: string | null;
-  timezone: string;
-  status: string;
-  source: string;
-  localNotificationId: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-};
+export type { ReminderSummary } from "@/api/reminders";
+export { listReminders } from "@/api/reminders";
 
 export type ParseRoutineResponse = {
   transcript: string;
   assistantMessage: string;
-  created: ReminderSummary[];
-  updated: ReminderSummary[];
+  created: ReminderSummaryType[];
+  updated: ReminderSummaryType[];
   deleted: Array<{ id: string }>;
   model?: string;
   sessionId?: string;
@@ -34,26 +23,4 @@ export function parseRoutine(
     token,
     body: input,
   });
-}
-
-export type ListRemindersResponse = {
-  reminders: ReminderSummary[];
-};
-
-export function listReminders(
-  token: string,
-  range?: { fromISO?: string; toISO?: string },
-) {
-  const params = new URLSearchParams();
-  if (range?.fromISO) params.set("from", range.fromISO);
-  if (range?.toISO) params.set("to", range.toISO);
-  const query = params.toString();
-
-  return apiFetch<ListRemindersResponse>(
-    `/reminders${query ? `?${query}` : ""}`,
-    {
-      method: "GET",
-      token,
-    },
-  );
 }

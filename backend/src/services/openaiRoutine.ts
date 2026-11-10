@@ -36,13 +36,29 @@ function getTimezoneOffsetISO(timezone: string, date: Date): string {
   return `${sign}${hours}:${minutes}`;
 }
 
-function buildSystemPrompt(timezone: string, now: Date) {
-  const today = new Intl.DateTimeFormat("en-CA", {
+function formatDateKeyInTimezone(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(now);
+  }).format(date);
+}
+
+/** Next Monday after today in the user's timezone (YYYY-MM-DD). */
+function nextWeekMondayKey(timezone: string, now: Date): string {
+  const todayKey = formatDateKeyInTimezone(now, timezone);
+  // Use noon UTC on today's calendar date so weekday math is stable across offsets.
+  const noonUtc = new Date(`${todayKey}T12:00:00.000Z`);
+  const weekday = noonUtc.getUTCDay(); // 0=Sun ... 6=Sat
+  const daysUntilNextMonday = ((8 - weekday) % 7) || 7;
+  const nextMonday = new Date(noonUtc);
+  nextMonday.setUTCDate(noonUtc.getUTCDate() + daysUntilNextMonday);
+  return formatDateKeyInTimezone(nextMonday, timezone);
+}
+
+function buildSystemPrompt(timezone: string, now: Date) {
+  const today = formatDateKeyInTimezone(now, timezone);
 
   const localNow = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
@@ -51,6 +67,7 @@ function buildSystemPrompt(timezone: string, now: Date) {
   }).format(now);
 
   const offset = getTimezoneOffsetISO(timezone, now);
+  const nextWeekMonday = nextWeekMondayKey(timezone, now);
 
   return [
     "You are a routine planning assistant.",
@@ -59,11 +76,22 @@ function buildSystemPrompt(timezone: string, now: Date) {
     "Interpret relative times using the user's timezone and today's date.",
     "Prefer fewer, clear reminders over noisy duplicates.",
     "Batch multiple new reminders into one create_reminders call when possible.",
-    "Ask for clarification via a normal message only if time is genuinely ambiguous and cannot be reasonably inferred.",
+    "Date/time inference rules (follow strictly):",
+    "1) Date given, no time: create a single timed reminder at 09:00 local that day. Do NOT invent a full workday range (no 09:00–18:00) unless the user asked for a range or duration.",
+    "2) Time given, no date: if that local clock time is still ahead of Current local datetime, use today; if that local clock time has already passed today, use tomorrow. Never schedule a reminder in the past when only a time was given.",
+    "3) Vague instructions (e.g. 'sometime next week', 'maybe', 'whenever', 'soon', 'later'): do NOT ask for clarification. Make a best-judgment assignment using Current local datetime and the phrasing, then create the reminder.",
+    "   Defaults for vague timing: prefer 09:00 local unless context implies morning/afternoon/evening/night.",
+    `   'next week' / 'sometime next week' → Monday ${nextWeekMonday} at 09:00 local (start of next calendar week, not later this week).`,
+    "   'this week' with no day → the next upcoming weekday at 09:00 (skip past days; if none left, use next week's Monday).",
+    "   'soon' / 'later today' → today at the next reasonable hour (at least ~1 hour ahead), else tomorrow 09:00.",
+    "   'tomorrow morning/afternoon/evening' → tomorrow at 09:00 / 14:00 / 18:00 respectively.",
+    "4) Always pick a concrete startAtISO. In the assistant message, briefly state the date/time you chose so the user can correct it later.",
+    "5) Only ask a clarification question if the request has no actionable task at all (not merely vague timing).",
     `User timezone: ${timezone}`,
     `Current UTC offset for that timezone: ${offset}`,
     `Today's date in user timezone (YYYY-MM-DD): ${today}`,
     `Current local datetime: ${localNow}`,
+    `Next week starts (Monday): ${nextWeekMonday}`,
     `When creating reminders, always pass startAtISO/endAtISO using offset ${offset} (example: ${today}T09:00:00${offset}).`,
   ].join(" ");
 }
