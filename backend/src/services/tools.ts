@@ -94,7 +94,7 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "list_reminders",
       description:
-        "List the user's reminders for a date range so you can update/delete the correct ones",
+        "List the user's reminders for a date range so you can update/delete the correct ones. Call this before update_reminder or delete_reminder when the Existing upcoming reminders list is missing or ambiguous.",
       parameters: {
         type: "object",
         properties: {

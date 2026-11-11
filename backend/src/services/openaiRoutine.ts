@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { AiSession } from "../models/AiSession";
+import { listRemindersForUser } from "./reminders";
 import {
   executeToolCall,
   routineTools,
@@ -7,7 +8,8 @@ import {
   type ToolExecutionRecord,
 } from "./tools";
 
-const MAX_TOOL_LOOPS = 3;
+// list_reminders → update/delete → final reply can need several steps
+const MAX_TOOL_LOOPS = 5;
 
 function getOpenAIClient() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -90,12 +92,19 @@ function buildSystemPrompt(timezone: string, now: Date) {
   }).format(now);
 
   return [
-    "You are a routine planning assistant.",
+    "You are a routine planning assistant that both creates and manages reminders.",
     "Convert the user's natural-language daily plan into concrete reminders.",
-    "Use tools to create, update, or delete reminders.",
+    "Use tools to create, update, or delete reminders. Never invent reminder ids.",
     "Interpret relative times using the user's timezone and the exact Current local datetime below.",
     "Prefer fewer, clear reminders over noisy duplicates.",
     "Batch multiple new reminders into one create_reminders call when possible.",
+    "Manage / update / delete rules (follow strictly):",
+    "A) If the user wants to move, rename, reschedule, cancel, complete, or delete an existing reminder, identify it first.",
+    "B) Prefer ids from the Existing upcoming reminders list below. If that list is empty or no clear match, call list_reminders with a wide range (yesterday → end of next week) before update_reminder or delete_reminder.",
+    "C) Match by title keywords case-insensitively (e.g. 'gym' matches 'Gym'). If several match, pick the soonest upcoming scheduled one unless the user was specific.",
+    "D) 'Move X to 8am' / 'change X to …' → update_reminder with the new startAtISO (keep title unless asked to rename).",
+    "E) 'Cancel X' → update_reminder status=cancelled (keep the row). 'Delete/remove X' → delete_reminder.",
+    "F) Do not create a duplicate when the user clearly asked to change an existing item.",
     "Date/time inference rules (follow strictly):",
     "1) Date given, no time: create a single timed reminder at 09:00 local that day. Do NOT invent a full workday range (no 09:00–18:00) unless the user asked for a range or duration.",
     "2) Time given, no date: if that local clock time is still ahead of Current local datetime, use today; if that local clock time has already passed today, use tomorrow. Never schedule a reminder in the past when only a time was given.",
@@ -117,7 +126,7 @@ function buildSystemPrompt(timezone: string, now: Date) {
     `Current local datetime: ${localNowPretty}`,
     `Current local datetime (ISO for math): ${localNowIso}`,
     `Next week starts (Monday): ${nextWeekMonday}`,
-    `When creating reminders, always pass startAtISO/endAtISO using offset ${offset} (example: ${today}T09:00:00${offset}).`,
+    `When creating or rescheduling reminders, always pass startAtISO/endAtISO using offset ${offset} (example: ${today}T09:00:00${offset}).`,
   ].join(" ");
 }
 
@@ -138,22 +147,77 @@ function formatReminderClock(isoOrDate: string | Date, timezone: string): string
   }
 }
 
-/** Prefer factual times from tool results so the UI message never invents 6:00 for a 17:50 reminder. */
+/** Prefer factual times from tool results so the UI message never invents wrong clocks. */
 function buildFactualAssistantMessage(
   modelMessage: string,
   affect: ToolAffectSummary,
   timezone: string,
 ): string {
-  if (affect.created.length === 0) {
+  const parts: string[] = [];
+
+  if (affect.created.length > 0) {
+    const lines = affect.created.map((item) => {
+      const when = formatReminderClock(item.startAt, item.timezone || timezone);
+      return `- ${item.title} at ${when}`;
+    });
+    parts.push(`Created ${affect.created.length} reminder(s):\n${lines.join("\n")}`);
+  }
+
+  if (affect.updated.length > 0) {
+    const lines = affect.updated.map((item) => {
+      const when = formatReminderClock(item.startAt, item.timezone || timezone);
+      return `- ${item.title} → ${when} (${item.status})`;
+    });
+    parts.push(`Updated ${affect.updated.length} reminder(s):\n${lines.join("\n")}`);
+  }
+
+  if (affect.deleted.length > 0) {
+    parts.push(
+      `Deleted ${affect.deleted.length} reminder(s): ${affect.deleted
+        .map((item) => item.id)
+        .join(", ")}`,
+    );
+  }
+
+  if (parts.length === 0) {
     return modelMessage;
   }
 
-  const lines = affect.created.map((item) => {
-    const when = formatReminderClock(item.startAt, item.timezone || timezone);
-    return `- ${item.title} at ${when}`;
-  });
+  // Keep a short model note when it adds useful context beyond the factual summary.
+  const trimmed = modelMessage.trim();
+  if (trimmed && !trimmed.toLowerCase().startsWith("scheduled")) {
+    return `${parts.join("\n\n")}\n\n${trimmed}`;
+  }
+  return parts.join("\n\n");
+}
 
-  return `Scheduled ${affect.created.length} reminder(s):\n${lines.join("\n")}`;
+async function buildExistingRemindersContext(
+  userId: string,
+  timezone: string,
+  now: Date,
+): Promise<string> {
+  const offset = getTimezoneOffsetISO(timezone, now);
+  const today = formatDateKeyInTimezone(now, timezone);
+  // Wide window so "move gym" / "delete lunch" can resolve without an extra tool call.
+  const fromISO = `${today}T00:00:00${offset}`;
+  const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const endKey = formatDateKeyInTimezone(end, timezone);
+  const toISO = `${endKey}T23:59:59${offset}`;
+
+  try {
+    const reminders = await listRemindersForUser(userId, fromISO, toISO);
+    const upcoming = reminders.filter((item) => item.status === "scheduled").slice(0, 30);
+    if (upcoming.length === 0) {
+      return "Existing upcoming reminders: (none in the next ~14 days).";
+    }
+    const lines = upcoming.map((item) => {
+      const when = formatReminderClock(item.startAt, item.timezone || timezone);
+      return `- id=${item.id} | ${item.title} | ${when} | status=${item.status}`;
+    });
+    return `Existing upcoming reminders (use these ids for update/delete):\n${lines.join("\n")}`;
+  } catch {
+    return "Existing upcoming reminders: (unavailable — call list_reminders before updating).";
+  }
 }
 
 export type ParseRoutineResult = {
@@ -178,8 +242,17 @@ export async function parseRoutineWithTools(input: {
   const now = new Date();
   const inputType = input.inputType ?? "text";
 
+  const existingContext = await buildExistingRemindersContext(
+    input.userId,
+    input.timezone,
+    now,
+  );
+
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(input.timezone, now) },
+    {
+      role: "system",
+      content: `${buildSystemPrompt(input.timezone, now)}\n\n${existingContext}`,
+    },
     { role: "user", content: input.text },
   ];
 

@@ -22,7 +22,9 @@ import { useAuth } from "@/auth/AuthContext";
 import { StatusBadge } from "@/components/status-badge";
 import { VoicePlanButton } from "@/components/voice-plan-button";
 import {
+  cancelReminderLocalNotification,
   requestNotificationPermission,
+  rescheduleReminderLocalNotification,
   scheduleReminderLocalNotification,
   syncLocalNotificationsForReminders,
 } from "@/notifications/local-reminders";
@@ -189,35 +191,42 @@ export function HomeScreen() {
       transcript?: string;
       assistantMessage: string;
       created: ReminderSummary[];
+      updated?: ReminderSummary[];
+      deleted?: Array<{ id: string }>;
     },
     options?: { keepTranscriptInBox?: boolean },
   ) {
-    const createdIds = new Set(result.created.map((item) => item.id));
+    const created = result.created ?? [];
+    const updated = result.updated ?? [];
+    const deleted = result.deleted ?? [];
+
+    const createdIds = new Set(created.map((item) => item.id));
     setJustCreatedIds(createdIds);
 
-    // Schedule local OS notifications for newly created reminders.
-    const scheduled = await Promise.all(
-      result.created.map((item) => scheduleReminderLocalNotification(item)),
-    );
-    if (
-      result.created.length > 0 &&
-      scheduled.every((id) => id == null)
-    ) {
-      Alert.alert(
-        "Reminder saved, but no alert was scheduled",
-        "Check that Notifications (and Alarms & reminders) are allowed for Routine Manager in Android Settings, then create another short test reminder.",
-      );
-    }
+    // Feature 7.1: keep OS local alerts aligned with create / update / delete.
+    await Promise.all([
+      ...created.map((item) => scheduleReminderLocalNotification(item)),
+      ...updated.map(async (item) => {
+        if (item.status === "scheduled") {
+          await rescheduleReminderLocalNotification(item);
+        } else {
+          // cancelled / completed → no future local ping
+          await cancelReminderLocalNotification(item.id);
+        }
+      }),
+      ...deleted.map((item) => cancelReminderLocalNotification(item.id)),
+    ]);
 
-    const createdCount = result.created.length;
+    const changedCount = created.length + updated.length + deleted.length;
     const baseMessage = result.assistantMessage || "Reminders processed.";
     const transcriptLine = result.transcript
       ? `Heard: “${result.transcript}”\n\n`
       : "";
-    const successMessage =
-      createdCount === 0
-        ? `${transcriptLine}${baseMessage}\n\nNo new reminders were saved — matching ones already existed.`
-        : `${transcriptLine}${baseMessage}`;
+
+    let successMessage = `${transcriptLine}${baseMessage}`;
+    if (changedCount === 0) {
+      successMessage = `${transcriptLine}${baseMessage}\n\nNo reminders were created, updated, or deleted.`;
+    }
 
     setPlan({
       status: "success",
@@ -381,20 +390,20 @@ export function HomeScreen() {
       contentContainerStyle={styles.content}
     >
       <View style={styles.section}>
-        <Text style={styles.title}>Plan my day</Text>
+        <Text style={styles.title}>Plan &amp; manage</Text>
         <Text style={styles.subtitle}>
-          Signed in as {user?.email ?? "your account"}. Type or speak what you
-          want to do; the backend AI turns it into reminders.
+          Signed in as {user?.email ?? "your account"}. Create reminders, or
+          manage existing ones in plain language (e.g. move, cancel, delete).
         </Text>
         <Text style={styles.meta}>Timezone: {timezone}</Text>
       </View>
 
       <View style={styles.composer}>
-        <Text style={styles.label}>Today&apos;s plan</Text>
+        <Text style={styles.label}>Say what to create or change</Text>
         <TextInput
-          accessibilityLabel="Plan text"
+          accessibilityLabel="Plan or manage text"
           multiline
-          placeholder="Today: deep work 9–11, call mom at 5pm, stretch at 8pm"
+          placeholder="Create: Gym at 7am · Manage: Move gym to 8am · Delete gym"
           placeholderTextColor="#a3a3a3"
           style={styles.planInput}
           textAlignVertical="top"
