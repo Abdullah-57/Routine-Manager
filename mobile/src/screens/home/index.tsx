@@ -13,10 +13,12 @@ import { ApiError, pingHealth } from "@/api/client";
 import {
   listReminders,
   parseRoutine,
+  parseRoutineAudio,
   type ReminderSummary,
 } from "@/api/routines";
 import { useAuth } from "@/auth/AuthContext";
 import { StatusBadge } from "@/components/status-badge";
+import { VoicePlanButton } from "@/components/voice-plan-button";
 
 type PingState =
   | { status: "idle" }
@@ -110,6 +112,7 @@ export function HomeScreen() {
   const [remindersError, setRemindersError] = useState<string | null>(null);
   const [ping, setPing] = useState<PingState>({ status: "idle" });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isVoiceBusy, setIsVoiceBusy] = useState(false);
   const isSubmittingRef = useRef(false);
 
   const timezone = useMemo(
@@ -152,8 +155,43 @@ export function HomeScreen() {
     }, [token, refreshReminders]),
   );
 
+  function applyParseSuccess(
+    result: {
+      transcript?: string;
+      assistantMessage: string;
+      created: ReminderSummary[];
+    },
+    options?: { keepTranscriptInBox?: boolean },
+  ) {
+    const createdIds = new Set(result.created.map((item) => item.id));
+    setJustCreatedIds(createdIds);
+
+    const createdCount = result.created.length;
+    const baseMessage = result.assistantMessage || "Reminders processed.";
+    const transcriptLine = result.transcript
+      ? `Heard: “${result.transcript}”\n\n`
+      : "";
+    const successMessage =
+      createdCount === 0
+        ? `${transcriptLine}${baseMessage}\n\nNo new reminders were saved — matching ones already existed.`
+        : `${transcriptLine}${baseMessage}`;
+
+    setPlan({
+      status: "success",
+      message: successMessage,
+    });
+
+    if (options?.keepTranscriptInBox && result.transcript) {
+      // Leave text so the user can edit and re-submit if needed.
+      setPlanText(result.transcript);
+    } else {
+      setPlanText("");
+    }
+    setShowAllReminders(false);
+  }
+
   async function handlePlanSubmit() {
-    if (isSubmittingRef.current) return;
+    if (isSubmittingRef.current || isVoiceBusy) return;
 
     const text = planText.trim();
     if (!text) {
@@ -177,23 +215,7 @@ export function HomeScreen() {
 
     try {
       const result = await parseRoutine(token, { text, timezone });
-      const createdIds = new Set(result.created.map((item) => item.id));
-      setJustCreatedIds(createdIds);
-
-      const createdCount = result.created.length;
-      const baseMessage = result.assistantMessage || "Reminders processed.";
-      const successMessage =
-        createdCount === 0
-          ? `${baseMessage}\n\nNo new reminders were saved — matching ones already existed.`
-          : baseMessage;
-
-      setPlan({
-        status: "success",
-        message: successMessage,
-      });
-      setPlanText("");
-      setShowAllReminders(false);
-
+      applyParseSuccess(result);
       await refreshReminders(token);
     } catch (error) {
       const message =
@@ -203,6 +225,39 @@ export function HomeScreen() {
       setPlan({ status: "error", message });
     } finally {
       isSubmittingRef.current = false;
+    }
+  }
+
+  async function handleVoiceRecorded(uri: string) {
+    if (!token) {
+      setPlan({
+        status: "error",
+        message: "You are not signed in. Log in again, then retry.",
+      });
+      return;
+    }
+
+    setIsVoiceBusy(true);
+    setPlan({ status: "loading" });
+
+    try {
+      // MVP UX from plan: record → auto-transcribe+parse → show results.
+      const result = await parseRoutineAudio(token, {
+        uri,
+        timezone,
+        filename: "routine.m4a",
+        mimeType: "audio/mp4",
+      });
+      applyParseSuccess(result, { keepTranscriptInBox: true });
+      await refreshReminders(token);
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Could not process voice plan. Check mic/network and try again.";
+      setPlan({ status: "error", message });
+    } finally {
+      setIsVoiceBusy(false);
     }
   }
 
@@ -245,8 +300,8 @@ export function HomeScreen() {
       <View style={styles.section}>
         <Text style={styles.title}>Plan my day</Text>
         <Text style={styles.subtitle}>
-          Signed in as {user?.email ?? "your account"}. Type what you want to do;
-          the backend AI turns it into reminders.
+          Signed in as {user?.email ?? "your account"}. Type or speak what you
+          want to do; the backend AI turns it into reminders.
         </Text>
         <Text style={styles.meta}>Timezone: {timezone}</Text>
       </View>
@@ -261,7 +316,7 @@ export function HomeScreen() {
           style={styles.planInput}
           textAlignVertical="top"
           value={planText}
-          editable={plan.status !== "loading"}
+          editable={plan.status !== "loading" && !isVoiceBusy}
           onChangeText={(next) => {
             setPlanText(next);
             if (plan.status === "error") {
@@ -270,19 +325,36 @@ export function HomeScreen() {
           }}
         />
 
+        <VoicePlanButton
+          disabled={plan.status === "loading" || isVoiceBusy}
+          onRecorded={handleVoiceRecorded}
+          onPermissionDenied={() => {
+            setPlan({
+              status: "error",
+              message:
+                "Microphone permission is required for voice plans. Enable it in system Settings for Expo Go / this app, then try again. You can still type a plan below.",
+            });
+          }}
+          onError={(message) => {
+            setPlan({ status: "error", message });
+          }}
+        />
+
         <Pressable
           accessibilityRole="button"
-          disabled={plan.status === "loading"}
+          disabled={plan.status === "loading" || isVoiceBusy}
           onPress={() => {
             void handlePlanSubmit();
           }}
           style={({ pressed }) => [
             styles.primaryButton,
             pressed ? styles.buttonPressed : null,
-            plan.status === "loading" ? styles.buttonDisabled : null,
+            plan.status === "loading" || isVoiceBusy
+              ? styles.buttonDisabled
+              : null,
           ]}
         >
-          {plan.status === "loading" ? (
+          {plan.status === "loading" && !isVoiceBusy ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
             <Text style={styles.primaryButtonLabel}>Submit plan</Text>

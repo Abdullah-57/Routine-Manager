@@ -11,7 +11,7 @@ export class ApiError extends Error {
   }
 }
 
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   if (!BASE_URL) {
     throw new ApiError(
       "EXPO_PUBLIC_API_URL is not set. Add it to mobile/.env and restart Expo.",
@@ -103,4 +103,64 @@ export type HealthResponse = {
 export function pingHealth() {
   // Cache-busting query so Android HTTP cache cannot reuse a prior 200
   return apiFetch<HealthResponse>(`/health?t=${Date.now()}`);
+}
+
+/**
+ * Multipart upload (e.g. audio). Do NOT set Content-Type — fetch/RN sets the
+ * multipart boundary automatically when body is FormData.
+ */
+export async function apiUploadForm<T>(
+  path: string,
+  formData: FormData,
+  options: { token?: string | null; method?: string } = {},
+): Promise<T> {
+  const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    Pragma: "no-cache",
+  };
+
+  if (options.token) {
+    headers.Authorization = `Bearer ${options.token}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: options.method ?? "POST",
+      cache: "no-store",
+      headers,
+      body: formData,
+    });
+  } catch {
+    throw new ApiError(
+      "Network error — is the backend running and is EXPO_PUBLIC_API_URL reachable?",
+      0,
+      "NETWORK_ERROR",
+    );
+  }
+
+  const text = await response.text();
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof data === "object" &&
+      data !== null &&
+      "error" in data &&
+      typeof (data as { error: unknown }).error === "string"
+        ? (data as { error: string }).error
+        : `HTTP ${response.status}`;
+    throw new ApiError(message, response.status);
+  }
+
+  return data as T;
 }

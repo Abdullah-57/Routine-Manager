@@ -1190,11 +1190,11 @@ $from = [Uri]::EscapeDataString('2020-01-01T00:00:00+05:00'); $to = [Uri]::Escap
 
 **Implement:**
 
-1. Use Expo audio recording API (`expo-audio` or `expo-av` depending on SDK).
-2. Mic button: press to record / press to stop (or hold-to-talk — pick one and keep simple).
-3. Request microphone permissions (iOS `Info.plist` / Android permissions via `app.json` plugins).
-4. Upload audio to `/routines/parse`.
-5. Show transcript in the text box for user edit → Confirm optional second step (recommended UX: show transcript, user taps Confirm to parse **or** parse immediately then allow undo).
+1. Use Expo audio recording API (`expo-audio` on SDK 58).
+2. Mic button: press to record / press to stop (Home: **Record voice plan** → **Stop & plan from voice**).
+3. Request microphone permissions on first record (`expo-audio` plugin in `app.json` for iOS mic string + Android `RECORD_AUDIO`).
+4. Upload audio to `/routines/parse` (multipart via `parseRoutineAudio`).
+5. Show transcript in the text box after voice parse (user can edit + Submit again); MVP auto-parses on stop.
 
 **Recommended UX for MVP:** Record → auto-transcribe+parse → show results; “Undo” deletes created reminders from that session if needed (optional stretch).
 

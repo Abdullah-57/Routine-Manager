@@ -1,4 +1,8 @@
-import { apiFetch } from "@/api/client";
+import {
+  FileSystemUploadType,
+  uploadAsync,
+} from "expo-file-system/legacy";
+import { ApiError, apiFetch, getBaseUrl } from "@/api/client";
 import type { ReminderSummary as ReminderSummaryType } from "@/api/reminders";
 
 export type { ReminderSummary } from "@/api/reminders";
@@ -12,6 +16,8 @@ export type ParseRoutineResponse = {
   deleted: Array<{ id: string }>;
   model?: string;
   sessionId?: string;
+  inputType?: "text" | "audio";
+  transcriptionModel?: string;
 };
 
 export function parseRoutine(
@@ -23,4 +29,78 @@ export function parseRoutine(
     token,
     body: input,
   });
+}
+
+function normalizeFileUri(uri: string): string {
+  // Android FormData/upload often needs an explicit file:// prefix.
+  if (uri.startsWith("file://") || uri.startsWith("content://")) {
+    return uri;
+  }
+  return `file://${uri}`;
+}
+
+/**
+ * Upload a recorded audio file to /routines/parse.
+ * Uses expo-file-system native multipart upload — React Native fetch+FormData
+ * file uploads often fail on Android with a generic "Network request failed".
+ */
+export async function parseRoutineAudio(
+  token: string,
+  input: {
+    uri: string;
+    timezone?: string;
+    filename?: string;
+    mimeType?: string;
+  },
+): Promise<ParseRoutineResponse> {
+  const url = `${getBaseUrl()}/routines/parse`;
+  const fileUri = normalizeFileUri(input.uri);
+  const mimeType = input.mimeType ?? "audio/mp4";
+
+  let result;
+  try {
+    result = await uploadAsync(url, fileUri, {
+      httpMethod: "POST",
+      uploadType: FileSystemUploadType.MULTIPART,
+      fieldName: "audio",
+      mimeType,
+      parameters: {
+        timezone: input.timezone ?? "UTC",
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : "Unknown upload error";
+    throw new ApiError(
+      `Voice upload failed — is the backend reachable at ${getBaseUrl()}? (${detail})`,
+      0,
+      "NETWORK_ERROR",
+    );
+  }
+
+  let data: unknown = null;
+  if (result.body) {
+    try {
+      data = JSON.parse(result.body);
+    } catch {
+      data = result.body;
+    }
+  }
+
+  if (result.status < 200 || result.status >= 300) {
+    const message =
+      typeof data === "object" &&
+      data !== null &&
+      "error" in data &&
+      typeof (data as { error: unknown }).error === "string"
+        ? (data as { error: string }).error
+        : `HTTP ${result.status}`;
+    throw new ApiError(message, result.status);
+  }
+
+  return data as ParseRoutineResponse;
 }
