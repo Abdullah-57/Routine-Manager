@@ -1,0 +1,24 @@
+# EAS upload ignore list (used instead of .gitignore when present).
+# Same as repo ignores, EXCEPT google-services.json is allowed so
+# `eas build` can still upload your local Firebase Android config.
+
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+build/
+.expo/
+mobile/android/
+mobile/ios/
+coverage/
+*.log
+.DS_Store
+eas-credentials/
+
+# Real secret — never upload the FCM service-account private key
+fcm-service-account.json
+*firebase-adminsdk*.json
+*service-account*.json
+
+# Do NOT ignore mobile/google-services.json here — EAS needs it for Android builds.

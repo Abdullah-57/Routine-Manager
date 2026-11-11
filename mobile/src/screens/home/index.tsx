@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { ApiError, pingHealth } from "@/api/client";
+import { sendTestPush } from "@/api/notifications";
 import {
   listReminders,
   parseRoutine,
@@ -27,6 +28,12 @@ import {
 } from "@/notifications/local-reminders";
 
 type PingState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "success"; message: string }
+  | { status: "error"; message: string };
+
+type TestPushState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "success"; message: string }
@@ -117,6 +124,7 @@ export function HomeScreen() {
   const [isLoadingReminders, setIsLoadingReminders] = useState(false);
   const [remindersError, setRemindersError] = useState<string | null>(null);
   const [ping, setPing] = useState<PingState>({ status: "idle" });
+  const [testPush, setTestPush] = useState<TestPushState>({ status: "idle" });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isVoiceBusy, setIsVoiceBusy] = useState(false);
   const isSubmittingRef = useRef(false);
@@ -313,6 +321,46 @@ export function HomeScreen() {
           ? error.message
           : "Something went wrong while pinging the API.";
       setPing({ status: "error", message });
+    }
+  }
+
+  /** Feature 6.3 — backend → Expo Push → FCM → this phone. */
+  async function handleTestPush() {
+    if (testPush.status === "loading") return;
+    if (!token) {
+      setTestPush({
+        status: "error",
+        message: "You are not signed in. Log in again, then retry.",
+      });
+      return;
+    }
+
+    setTestPush({ status: "loading" });
+
+    try {
+      const result = await sendTestPush(token);
+      if (!result.ok || result.sent < 1) {
+        const detail =
+          result.errors.length > 0
+            ? result.errors.join("; ")
+            : "Expo accepted no tickets.";
+        setTestPush({
+          status: "error",
+          message: `Push not delivered (${detail})`,
+        });
+        return;
+      }
+
+      setTestPush({
+        status: "success",
+        message: `Sent ${result.sent} push(es) to ${result.deviceCount} device(s). Check the notification shade (app can stay open or backgrounded).`,
+      });
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Could not send test push. Is the backend running?";
+      setTestPush({ status: "error", message });
     }
   }
 
@@ -520,6 +568,41 @@ export function HomeScreen() {
         <View style={[styles.result, styles.resultError]}>
           <Text style={styles.resultLabel}>Error</Text>
           <Text style={styles.resultBody}>{ping.message}</Text>
+        </View>
+      ) : null}
+
+      <Pressable
+        accessibilityRole="button"
+        disabled={testPush.status === "loading" || !token}
+        onPress={() => {
+          void handleTestPush();
+        }}
+        style={({ pressed }) => [
+          styles.secondaryButton,
+          pressed ? styles.buttonPressed : null,
+          testPush.status === "loading" || !token
+            ? styles.buttonDisabled
+            : null,
+        ]}
+      >
+        {testPush.status === "loading" ? (
+          <ActivityIndicator color="#2563eb" />
+        ) : (
+          <Text style={styles.secondaryButtonLabel}>Send test push</Text>
+        )}
+      </Pressable>
+
+      {testPush.status === "success" ? (
+        <View style={[styles.result, styles.resultSuccess]}>
+          <Text style={styles.resultLabel}>Test push</Text>
+          <Text style={styles.resultBody}>{testPush.message}</Text>
+        </View>
+      ) : null}
+
+      {testPush.status === "error" ? (
+        <View style={[styles.result, styles.resultError]}>
+          <Text style={styles.resultLabel}>Test push error</Text>
+          <Text style={styles.resultBody}>{testPush.message}</Text>
         </View>
       ) : null}
 

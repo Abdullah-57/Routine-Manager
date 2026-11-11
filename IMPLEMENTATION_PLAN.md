@@ -1563,7 +1563,7 @@ Assuming work starts from an empty folder mid-week:
 - [x] 6.1 Local notifications
 - [x] 6.1b Dev build (if needed)
 - [x] 6.2 Push token register
-- [ ] 6.3 Remote push (optional)
+- [x] 6.3 Remote push (optional)
 - [ ] 7.1 NL update/delete
 - [ ] 8.1 Backend deploy (Render Free)
 - [ ] 8.2 EAS Update

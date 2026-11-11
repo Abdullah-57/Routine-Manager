@@ -4,6 +4,7 @@ import express from "express";
 import { connectDb } from "./db/connect";
 import { authRouter } from "./routes/auth";
 import { devicesRouter } from "./routes/devices";
+import { notificationsRouter } from "./routes/notifications";
 import { remindersRouter } from "./routes/reminders";
 import { routinesRouter } from "./routes/routines";
 
@@ -22,6 +23,7 @@ app.get("/health", (_req, res) => {
 
 app.use("/auth", authRouter);
 app.use("/devices", devicesRouter);
+app.use("/notifications", notificationsRouter);
 app.use("/reminders", remindersRouter);
 app.use("/routines", routinesRouter);
 

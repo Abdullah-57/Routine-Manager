@@ -34,8 +34,8 @@ yarn-error.*
 .env*.local
 .env
 
-# Firebase / FCM — never commit the private service-account key.
-# google-services.json is OK to commit (public client ids); keep the key out.
+# Firebase / FCM — keep locally, never commit to GitHub
+google-services.json
 *firebase-adminsdk*.json
 *service-account*.json
 fcm-service-account.json
