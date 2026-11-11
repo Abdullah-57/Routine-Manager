@@ -20,6 +20,10 @@ import {
 } from "@/api/reminders";
 import { useAuth } from "@/auth/AuthContext";
 import {
+  cancelReminderLocalNotification,
+  rescheduleReminderLocalNotification,
+} from "@/notifications/local-reminders";
+import {
   formatReminderTime,
   fromLocalDateTimeInput,
   toLocalDateTimeInput,
@@ -162,6 +166,7 @@ export function ReminderDetailScreen() {
 
       applyReminderToForm(reminder);
       setLoad({ status: "ready", reminder });
+      await rescheduleReminderLocalNotification(reminder);
       setSaveMessage("Saved. Calendar and Home will refresh when you go back.");
     } catch (error) {
       const message =
@@ -204,6 +209,7 @@ export function ReminderDetailScreen() {
 
     try {
       await deleteReminder(token, id);
+      await cancelReminderLocalNotification(id);
       back();
     } catch (error) {
       const message =

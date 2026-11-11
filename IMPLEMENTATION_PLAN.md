@@ -1559,9 +1559,9 @@ Assuming work starts from an empty folder mid-week:
 - [x] 4.1 Calendar UI
 - [x] 4.2 Detail edit/delete
 - [x] 5.1 Whisper backend
-- [ ] 5.2 Mic UI
-- [ ] 6.1 Local notifications
-- [ ] 6.1b Dev build (if needed)
+- [x] 5.2 Mic UI
+- [x] 6.1 Local notifications
+- [x] 6.1b Dev build (if needed)
 - [ ] 6.2 Push token register
 - [ ] 6.3 Remote push (optional)
 - [ ] 7.1 NL update/delete

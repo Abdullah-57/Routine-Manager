@@ -2,6 +2,7 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +20,11 @@ import {
 import { useAuth } from "@/auth/AuthContext";
 import { StatusBadge } from "@/components/status-badge";
 import { VoicePlanButton } from "@/components/voice-plan-button";
+import {
+  requestNotificationPermission,
+  scheduleReminderLocalNotification,
+  syncLocalNotificationsForReminders,
+} from "@/notifications/local-reminders";
 
 type PingState =
   | { status: "idle" }
@@ -137,6 +143,8 @@ export function HomeScreen() {
     try {
       const { reminders } = await listReminders(authToken);
       setAllReminders(reminders);
+      // Keep on-device local alerts in sync with future scheduled reminders.
+      void syncLocalNotificationsForReminders(reminders);
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -148,14 +156,27 @@ export function HomeScreen() {
     }
   }, []);
 
+  const notifiedPermissionRef = useRef(false);
+
   useFocusEffect(
     useCallback(() => {
       if (!token) return;
+      // Feature 6.1: ask once (OS may no-op if already decided).
+      void (async () => {
+        const allowed = await requestNotificationPermission();
+        if (!allowed && !notifiedPermissionRef.current) {
+          notifiedPermissionRef.current = true;
+          Alert.alert(
+            "Notifications are off",
+            "Open Android Settings → Apps → Routine Manager → Notifications, turn them ON, then also allow Alarms & reminders if you see that option.",
+          );
+        }
+      })();
       void refreshReminders(token);
     }, [token, refreshReminders]),
   );
 
-  function applyParseSuccess(
+  async function applyParseSuccess(
     result: {
       transcript?: string;
       assistantMessage: string;
@@ -165,6 +186,20 @@ export function HomeScreen() {
   ) {
     const createdIds = new Set(result.created.map((item) => item.id));
     setJustCreatedIds(createdIds);
+
+    // Schedule local OS notifications for newly created reminders.
+    const scheduled = await Promise.all(
+      result.created.map((item) => scheduleReminderLocalNotification(item)),
+    );
+    if (
+      result.created.length > 0 &&
+      scheduled.every((id) => id == null)
+    ) {
+      Alert.alert(
+        "Reminder saved, but no alert was scheduled",
+        "Check that Notifications (and Alarms & reminders) are allowed for Routine Manager in Android Settings, then create another short test reminder.",
+      );
+    }
 
     const createdCount = result.created.length;
     const baseMessage = result.assistantMessage || "Reminders processed.";
@@ -215,7 +250,7 @@ export function HomeScreen() {
 
     try {
       const result = await parseRoutine(token, { text, timezone });
-      applyParseSuccess(result);
+      await applyParseSuccess(result);
       await refreshReminders(token);
     } catch (error) {
       const message =
@@ -248,7 +283,7 @@ export function HomeScreen() {
         filename: "routine.m4a",
         mimeType: "audio/mp4",
       });
-      applyParseSuccess(result, { keepTranscriptInBox: true });
+      await applyParseSuccess(result, { keepTranscriptInBox: true });
       await refreshReminders(token);
     } catch (error) {
       const message =

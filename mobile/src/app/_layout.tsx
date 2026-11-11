@@ -9,6 +9,8 @@ import { useEffect } from "react";
 import { useColorScheme } from "react-native";
 import "react-native-reanimated";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
+import "@/notifications/handler";
+import { useNotificationNavigation } from "@/notifications/use-notification-navigation";
 
 export { ErrorBoundary } from "expo-router";
 
@@ -18,7 +20,9 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 
 function RootNavigator() {
   const colorScheme = useColorScheme();
-  const { isHydrated } = useAuth();
+  const { isHydrated, token } = useAuth();
+  // Wait until auth is ready and user is signed in before pushing reminder routes.
+  useNotificationNavigation(isHydrated && !!token);
 
   useEffect(() => {
     if (isHydrated) {
