@@ -11,6 +11,7 @@ import "react-native-reanimated";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
 import "@/notifications/handler";
 import { useNotificationNavigation } from "@/notifications/use-notification-navigation";
+import { useRegisterPushToken } from "@/notifications/use-register-push-token";
 
 export { ErrorBoundary } from "expo-router";
 
@@ -23,6 +24,8 @@ function RootNavigator() {
   const { isHydrated, token } = useAuth();
   // Wait until auth is ready and user is signed in before pushing reminder routes.
   useNotificationNavigation(isHydrated && !!token);
+  // Feature 6.2: save Expo push token on the backend after login / hydrate.
+  useRegisterPushToken(isHydrated ? token : null);
 
   useEffect(() => {
     if (isHydrated) {

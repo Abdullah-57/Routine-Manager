@@ -1562,7 +1562,7 @@ Assuming work starts from an empty folder mid-week:
 - [x] 5.2 Mic UI
 - [x] 6.1 Local notifications
 - [x] 6.1b Dev build (if needed)
-- [ ] 6.2 Push token register
+- [x] 6.2 Push token register
 - [ ] 6.3 Remote push (optional)
 - [ ] 7.1 NL update/delete
 - [ ] 8.1 Backend deploy (Render Free)

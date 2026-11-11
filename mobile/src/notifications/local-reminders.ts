@@ -206,22 +206,8 @@ export async function scheduleReminderLocalNotification(
     // Near-term: TIME_INTERVAL is often more reliable than DATE on Android.
     // Longer-term: DATE + alarmClock for wall-clock delivery.
     const useInterval = msUntil <= 60 * 60 * 1000; // within 1 hour
-    const trigger = useInterval
-      ? {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: Math.max(2, Math.ceil(msUntil / 1000)),
-          ...(Platform.OS === "android"
-            ? { channelId: REMINDERS_CHANNEL_ID }
-            : {}),
-        }
-      : {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: when,
-          delivery: "alarmClock" as const,
-          ...(Platform.OS === "android"
-            ? { channelId: REMINDERS_CHANNEL_ID }
-            : {}),
-        };
+    const androidChannel =
+      Platform.OS === "android" ? { channelId: REMINDERS_CHANNEL_ID } : {};
 
     const identifier = await Notifications.scheduleNotificationAsync({
       content: {
@@ -236,11 +222,20 @@ export async function scheduleReminderLocalNotification(
           deepLink,
         },
         sound: true,
-        ...(Platform.OS === "android"
-          ? { channelId: REMINDERS_CHANNEL_ID }
-          : {}),
+        ...androidChannel,
       },
-      trigger,
+      trigger: useInterval
+        ? {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: Math.max(2, Math.ceil(msUntil / 1000)),
+            ...androidChannel,
+          }
+        : {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: when,
+            delivery: "alarmClock",
+            ...androidChannel,
+          },
     });
 
     if (__DEV__) {
