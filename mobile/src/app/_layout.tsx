@@ -68,7 +68,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
           name="reminder/[id]"
-          options={{ title: "Reminder", presentation: "card" }}
+          options={{ title: "Reminder", presentation: "card", headerShown: false }}
         />
       </Stack>
     </ThemeProvider>

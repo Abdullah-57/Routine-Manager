@@ -1,13 +1,16 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "@/api/client";
 import {
   deleteReminder,
@@ -20,8 +23,6 @@ import { useAuth } from "@/auth/AuthContext";
 import { AppButton } from "@/components/ui/app-button";
 import { AppTextField } from "@/components/ui/app-text-field";
 import { FeedbackBanner } from "@/components/ui/feedback-banner";
-import { ScreenScroll } from "@/components/ui/screen";
-import { ThemedText } from "@/components/ui/themed-text";
 import {
   cancelReminderLocalNotification,
   rescheduleReminderLocalNotification,
@@ -31,7 +32,7 @@ import {
   fromLocalDateTimeInput,
   toLocalDateTimeInput,
 } from "@/utils/reminder-time";
-import { colors, radius, shadows, spacing } from "@/theme";
+import { radius, shadows, spacing } from "@/theme";
 
 type LoadState =
   | { status: "loading" }
@@ -52,10 +53,25 @@ function getDeviceTimezone() {
   }
 }
 
+function BackChevron() {
+  if (process.env.EXPO_OS === "ios") {
+    return (
+      <SymbolView
+        name="chevron.left"
+        size={20}
+        tintColor="#1D4ED8"
+        weight="semibold"
+      />
+    );
+  }
+  return <Text style={styles.backFallback}>‹</Text>;
+}
+
 export function ReminderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token, user } = useAuth();
   const { back } = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [title, setTitle] = useState("");
@@ -118,6 +134,7 @@ export function ReminderDetailScreen() {
   }, [token, id, applyReminderToForm]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-existing load-on-mount flow, unchanged
     void loadReminder();
   }, [loadReminder]);
 
@@ -226,171 +243,296 @@ export function ReminderDetailScreen() {
     }
   }
 
+  const startPreview = fromLocalDateTimeInput(startLocal, timezone);
+  const endPreview = endLocal.trim()
+    ? fromLocalDateTimeInput(endLocal.trim(), timezone)
+    : null;
+
   return (
-    <ScreenScroll>
-      {load.status === "loading" ? (
-        <ActivityIndicator color={colors.tint} />
-      ) : null}
+    <View style={styles.root}>
+      <View style={styles.headerGlow} pointerEvents="none" />
 
-      {load.status === "error" ? (
-        <FeedbackBanner
-          tone="error"
-          title="Error"
-          body={load.message}
-          actionLabel="Retry"
-          onAction={() => {
-            void loadReminder();
-          }}
-        />
-      ) : null}
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + spacing.md },
+        ]}
+      >
+        {load.status === "loading" ? (
+          <ActivityIndicator color="#1D4ED8" />
+        ) : null}
 
-      {load.status === "error" ? (
-        <AppButton label="Go back" variant="ghost" onPress={() => back()} />
-      ) : null}
-
-      {load.status === "ready" ? (
-        <View style={styles.card}>
-          <ThemedText variant="largeTitle">Edit reminder</ThemedText>
-          <ThemedText variant="caption">
-            Source: {load.reminder.source} · TZ: {timezone}
-          </ThemedText>
-
-          <ThemedText variant="label">Title</ThemedText>
-          <AppTextField
-            value={title}
-            onChangeText={(next) => {
-              setTitle(next);
-              setFormError(null);
-              setSaveMessage(null);
+        {load.status === "error" ? (
+          <FeedbackBanner
+            tone="error"
+            title="Error"
+            body={load.message}
+            actionLabel="Retry"
+            onAction={() => {
+              void loadReminder();
             }}
-            editable={!isSaving && !isDeleting}
           />
+        ) : null}
 
-          <ThemedText variant="label">Notes</ThemedText>
-          <AppTextField
-            style={styles.notesInput}
-            multiline
-            textAlignVertical="top"
-            value={notes}
-            onChangeText={(next) => {
-              setNotes(next);
-              setFormError(null);
-              setSaveMessage(null);
-            }}
-            editable={!isSaving && !isDeleting}
-          />
+        {load.status === "error" ? (
+          <AppButton label="Go back" variant="ghost" onPress={() => back()} />
+        ) : null}
 
-          <ThemedText variant="label">Status</ThemedText>
-          <View style={styles.statusRow}>
-            {STATUS_OPTIONS.map((option) => {
-              const selected = status === option;
-              return (
-                <Pressable
-                  key={option}
-                  accessibilityRole="button"
-                  disabled={isSaving || isDeleting}
-                  onPress={() => {
-                    setStatus(option);
-                    setFormError(null);
-                    setSaveMessage(null);
-                  }}
-                  style={({ pressed }) => [
-                    styles.statusChip,
-                    selected ? styles.statusChipSelected : null,
-                    pressed ? styles.pressed : null,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusChipLabel,
-                      selected ? styles.statusChipLabelSelected : null,
-                    ]}
-                  >
-                    {option}
+        {load.status === "ready" ? (
+          <>
+            <View style={styles.titleRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                onPress={() => back()}
+                style={({ pressed }) => [
+                  styles.backButton,
+                  pressed ? styles.pressed : null,
+                ]}
+              >
+                <BackChevron />
+              </Pressable>
+              <Text style={styles.screenTitle}>Edit reminder</Text>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Title</Text>
+              <AppTextField
+                value={title}
+                onChangeText={(next) => {
+                  setTitle(next);
+                  setFormError(null);
+                  setSaveMessage(null);
+                }}
+                editable={!isSaving && !isDeleting}
+                placeholderTextColor="#94A3B8"
+                selectionColor="#1D4ED8"
+                style={styles.input}
+              />
+
+              <Text style={styles.fieldLabel}>Notes</Text>
+              <AppTextField
+                style={[styles.input, styles.notesInput]}
+                multiline
+                textAlignVertical="top"
+                value={notes}
+                onChangeText={(next) => {
+                  setNotes(next);
+                  setFormError(null);
+                  setSaveMessage(null);
+                }}
+                editable={!isSaving && !isDeleting}
+                placeholderTextColor="#94A3B8"
+                selectionColor="#1D4ED8"
+              />
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Starts</Text>
+              <AppTextField
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="2026-11-12T09:00"
+                value={startLocal}
+                onChangeText={(next) => {
+                  setStartLocal(next);
+                  setFormError(null);
+                  setSaveMessage(null);
+                }}
+                editable={!isSaving && !isDeleting}
+                placeholderTextColor="#94A3B8"
+                selectionColor="#1D4ED8"
+                style={styles.input}
+              />
+              {startLocal.trim() ? (
+                startPreview ? (
+                  <Text style={styles.previewValid}>
+                    {formatReminderTime(startPreview, timezone)}
                   </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <ThemedText variant="label">Start (local)</ThemedText>
-          <ThemedText variant="caption">Format: YYYY-MM-DDTHH:mm</ThemedText>
-          <AppTextField
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={startLocal}
-            onChangeText={(next) => {
-              setStartLocal(next);
-              setFormError(null);
-              setSaveMessage(null);
-            }}
-            editable={!isSaving && !isDeleting}
-          />
-          <ThemedText variant="caption">
-            Preview:{" "}
-            {fromLocalDateTimeInput(startLocal, timezone)
-              ? formatReminderTime(
-                  fromLocalDateTimeInput(startLocal, timezone)!,
-                  timezone,
+                ) : (
+                  <Text style={styles.previewInvalid}>
+                    Use the format 2026-11-12T09:00
+                  </Text>
                 )
-              : "invalid"}
-          </ThemedText>
+              ) : null}
 
-          <ThemedText variant="label">End (optional)</ThemedText>
-          <AppTextField
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="Leave blank for none"
-            value={endLocal}
-            onChangeText={(next) => {
-              setEndLocal(next);
-              setFormError(null);
-              setSaveMessage(null);
-            }}
-            editable={!isSaving && !isDeleting}
-          />
+              <Text style={styles.fieldLabel}>Ends · optional</Text>
+              <AppTextField
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="2026-11-12T18:00 · leave blank for none"
+                value={endLocal}
+                onChangeText={(next) => {
+                  setEndLocal(next);
+                  setFormError(null);
+                  setSaveMessage(null);
+                }}
+                editable={!isSaving && !isDeleting}
+                placeholderTextColor="#94A3B8"
+                selectionColor="#1D4ED8"
+                style={styles.input}
+              />
+              {endLocal.trim() ? (
+                endPreview ? (
+                  <Text style={styles.previewValid}>
+                    {formatReminderTime(endPreview, timezone)}
+                  </Text>
+                ) : (
+                  <Text style={styles.previewInvalid}>
+                    Use the format 2026-11-12T18:00
+                  </Text>
+                )
+              ) : null}
+            </View>
 
-          {formError ? (
-            <FeedbackBanner tone="error" title="Error" body={formError} />
-          ) : null}
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Status</Text>
+              <View style={styles.statusRow}>
+                {STATUS_OPTIONS.map((option) => {
+                  const selected = status === option;
+                  return (
+                    <Pressable
+                      key={option}
+                      accessibilityRole="button"
+                      disabled={isSaving || isDeleting}
+                      onPress={() => {
+                        setStatus(option);
+                        setFormError(null);
+                        setSaveMessage(null);
+                      }}
+                      style={({ pressed }) => [
+                        styles.statusChip,
+                        selected ? styles.statusChipSelected : null,
+                        pressed ? styles.pressed : null,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusChipLabel,
+                          selected ? styles.statusChipLabelSelected : null,
+                        ]}
+                      >
+                        {option}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
 
-          {saveMessage ? (
-            <FeedbackBanner tone="success" title="Saved" body={saveMessage} />
-          ) : null}
+            {formError ? (
+              <FeedbackBanner tone="error" title="Error" body={formError} />
+            ) : null}
 
-          <AppButton
-            label="Save changes"
-            loading={isSaving}
-            disabled={isDeleting}
-            onPress={() => {
-              void handleSave();
-            }}
-          />
+            {saveMessage ? (
+              <FeedbackBanner tone="success" title="Saved" body={saveMessage} />
+            ) : null}
 
-          <AppButton
-            label="Delete reminder"
-            variant="danger"
-            loading={isDeleting}
-            disabled={isSaving}
-            onPress={confirmDelete}
-          />
-        </View>
-      ) : null}
-    </ScreenScroll>
+            <View style={styles.actions}>
+              <AppButton
+                label="Save changes"
+                loading={isSaving}
+                disabled={isDeleting}
+                onPress={() => {
+                  void handleSave();
+                }}
+                style={styles.primaryButton}
+              />
+
+              <AppButton
+                label="Delete reminder"
+                variant="danger"
+                loading={isDeleting}
+                disabled={isSaving}
+                onPress={confirmDelete}
+                style={styles.dangerButton}
+              />
+            </View>
+          </>
+        ) : null}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    gap: spacing.sm,
+  root: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
+  headerGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 180,
+    experimental_backgroundImage: `
+      linear-gradient(180deg, rgba(147, 197, 253, 0.55) 0%, rgba(59, 130, 246, 0.18) 55%, rgba(255, 255, 255, 0) 100%)
+    `,
+  },
+  content: {
     padding: spacing.md,
-    borderRadius: radius.lg,
+    gap: spacing.md,
+    paddingBottom: spacing.xxl,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+  },
+  backFallback: {
+    fontSize: 24,
+    lineHeight: 26,
+    color: "#1D4ED8",
+  },
+  screenTitle: {
+    fontSize: 26,
+    fontWeight: "700",
+    letterSpacing: -0.4,
+    color: "#0F172A",
+  },
+  card: {
+    gap: spacing.sm + 2,
+    padding: spacing.md,
+    borderRadius: radius.xl,
     borderCurve: "continuous",
-    backgroundColor: colors.secondaryGroupedBackground,
+    backgroundColor: "#FFFFFF",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(37, 99, 235, 0.18)",
     boxShadow: shadows.subtle,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    color: "#2563EB",
+    textTransform: "uppercase",
+  },
+  input: {
+    color: "#0F172A",
+    backgroundColor: "#FFFFFF",
+    borderColor: "rgba(37, 99, 235, 0.18)",
   },
   notesInput: {
     minHeight: 90,
+  },
+  previewValid: {
+    fontSize: 13,
+    color: "#1D4ED8",
+  },
+  previewInvalid: {
+    fontSize: 13,
+    color: "#DC2626",
   },
   statusRow: {
     flexDirection: "row",
@@ -401,18 +543,28 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     paddingHorizontal: spacing.sm + 4,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.fill,
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
   },
   statusChipSelected: {
-    backgroundColor: colors.tint,
+    backgroundColor: "#1D4ED8",
   },
   statusChipLabel: {
     fontSize: 13,
     fontWeight: "600",
-    color: colors.secondaryLabel,
+    color: "#334155",
+    textTransform: "capitalize",
   },
   statusChipLabelSelected: {
-    color: colors.onTint,
+    color: "#FFFFFF",
+  },
+  actions: {
+    gap: spacing.sm,
+  },
+  primaryButton: {
+    backgroundColor: "#1D4ED8",
+  },
+  dangerButton: {
+    borderColor: "#DC2626",
   },
   pressed: {
     opacity: 0.85,

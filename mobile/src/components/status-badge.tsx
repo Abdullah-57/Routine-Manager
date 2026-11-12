@@ -19,8 +19,8 @@ const STATUS_STYLES: Record<
     color: "#059669",
   },
   cancelled: {
-    backgroundColor: "#F3F4F6",
-    color: "#64748B",
+    backgroundColor: "rgba(220, 38, 38, 0.12)",
+    color: "#DC2626",
   },
 };
 

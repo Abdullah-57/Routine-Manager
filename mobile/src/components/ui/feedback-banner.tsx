@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   body: {
-    color: colors.label,
+    color: "#334155",
   },
   action: {
     marginTop: spacing.xs,
