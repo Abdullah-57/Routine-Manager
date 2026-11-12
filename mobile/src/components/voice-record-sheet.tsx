@@ -5,11 +5,12 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from "expo-audio";
-import { BottomSheet } from "@expo/ui";
-import { useEffect, useRef } from "react";
+import type { AudioRecorder } from "expo-audio";
+import { BottomSheet, Button, Column } from "@expo/ui";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Dimensions,
-  Pressable,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -29,14 +30,55 @@ type VoiceRecordSheetProps = {
 };
 
 const SHEET_WIDTH = Dimensions.get("window").width;
+/** Max time to wait for expo-audio's stop() before continuing without it. */
+const STOP_SETTLE_MS = 1200;
+
+/**
+ * The red tint only applies to the native iOS button (SwiftUI). It is loaded
+ * lazily so Android/web never touch the Swift-UI modifier module.
+ */
+function stopButtonModifiers() {
+  if (Platform.OS !== "ios") return [];
+  const { tint } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy-load keeps Android/web away from Swift-UI-only modifiers
+    require("@expo/ui/swift-ui/modifiers") as typeof import("@expo/ui/swift-ui/modifiers");
+  return [tint("#DC2626")];
+}
+
+/**
+ * Owns the metering polling. Its 80ms updates re-render only this subtree —
+ * never the sheet content around it. A constantly re-driven native sheet
+ * swallows touches on its hosted content, which is why the Stop button
+ * appeared dead while the waveform was running.
+ */
+function RecordingWaveform({
+  recorder,
+  presented,
+}: {
+  recorder: AudioRecorder;
+  presented: boolean;
+}) {
+  const recorderState = useAudioRecorderState(recorder, 80);
+  const level = normalizeMetering(recorderState.metering);
+
+  return (
+    <View style={styles.waveWrap}>
+      <VoiceWaveform
+        level={level}
+        active={recorderState.isRecording || presented}
+      />
+    </View>
+  );
+}
 
 /**
  * Bottom sheet with live waveform while recording.
  * Stop → returns audio URI to parent (parent transcribes into the text field).
  *
- * Important: BottomSheet children are React Native views. Nesting another
- * @expo/ui Host/Button inside collapses into a tiny misaligned control and
- * often ignores presses — so Stop is a full-width RN Pressable.
+ * Stop is the native @expo/ui Button placed directly inside the sheet, not a
+ * React Native Pressable: touches on RN-hosted content inside the native
+ * sheet were not registering, while native controls keep their own native
+ * touch path.
  */
 export function VoiceRecordSheet({
   isPresented,
@@ -49,13 +91,9 @@ export function VoiceRecordSheet({
     ...RecordingPresets.HIGH_QUALITY,
     isMeteringEnabled: true,
   });
-  const recorderState = useAudioRecorderState(recorder, 80);
   const startingRef = useRef(false);
   const stoppingRef = useRef(false);
   const startedRef = useRef(false);
-
-  const isRecording = recorderState.isRecording;
-  const level = normalizeMetering(recorderState.metering);
 
   useEffect(() => {
     if (!isPresented) {
@@ -67,6 +105,8 @@ export function VoiceRecordSheet({
     if (startedRef.current || startingRef.current) return;
     startedRef.current = true;
     startingRef.current = true;
+    // Insurance: never carry a stuck stop guard into a new presentation.
+    stoppingRef.current = false;
 
     void (async () => {
       try {
@@ -97,16 +137,33 @@ export function VoiceRecordSheet({
     })();
   }, [isPresented, onDismiss, onError, onPermissionDenied, recorder]);
 
-  async function handleStop() {
+  const handleStop = useCallback(async () => {
     if (stoppingRef.current) return;
     stoppingRef.current = true;
 
     try {
-      const status = recorder.getStatus();
-      if (status.isRecording) {
-        await recorder.stop();
+      try {
+        if (recorder.isRecording) {
+          // Known expo-audio quirk: stop() can hang or reject while recorder
+          // status is being polled, which made the Stop button do nothing.
+          // Race it so the flow always continues.
+          await Promise.race([
+            recorder.stop(),
+            new Promise((resolve) => setTimeout(resolve, STOP_SETTLE_MS)),
+          ]);
+        }
+      } catch {
+        // stop() may reject if the recorder already stopped — the file can
+        // still be usable, so fall through and try the uri.
       }
-      const uri = recorder.uri;
+
+      // If stop() is slow to finalize the file, give it a short grace period.
+      let uri = recorder.uri;
+      for (let attempt = 0; !uri && attempt < 10; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        uri = recorder.uri;
+      }
+
       onDismiss();
       if (!uri) {
         onError("Recording finished but no audio file was saved. Try again.");
@@ -123,7 +180,11 @@ export function VoiceRecordSheet({
     } finally {
       stoppingRef.current = false;
     }
-  }
+  }, [onDismiss, onError, onRecorded, recorder]);
+
+  const handleStopPress = useCallback(() => {
+    void handleStop();
+  }, [handleStop]);
 
   async function handleDismiss() {
     if (stoppingRef.current) {
@@ -131,7 +192,7 @@ export function VoiceRecordSheet({
       return;
     }
     try {
-      if (recorder.getStatus().isRecording) {
+      if (recorder.isRecording) {
         await recorder.stop();
       }
     } catch {
@@ -170,25 +231,18 @@ export function VoiceRecordSheet({
           transcript in the text field.
         </Text>
 
-        <View style={styles.waveWrap}>
-          <VoiceWaveform level={level} active={isRecording || isPresented} />
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Stop recording"
-          hitSlop={12}
-          onPress={() => {
-            void handleStop();
-          }}
-          style={({ pressed }) => [
-            styles.stopButton,
-            pressed ? styles.stopPressed : null,
-          ]}
-        >
-          <Text style={styles.stopLabel}>Stop</Text>
-        </Pressable>
+        <RecordingWaveform recorder={recorder} presented={isPresented} />
       </View>
+
+      <Column alignment="center" style={styles.buttonRow}>
+        <Button
+          label="Stop"
+          variant="filled"
+          onPress={handleStopPress}
+          style={styles.stopButton}
+          modifiers={stopButtonModifiers()}
+        />
+      </Column>
     </BottomSheet>
   );
 }
@@ -201,7 +255,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.lg,
   },
   title: {
     width: "100%",
@@ -224,22 +278,12 @@ const styles = StyleSheet.create({
     minHeight: 80,
     paddingVertical: spacing.sm,
   },
+  buttonRow: {
+    width: SHEET_WIDTH,
+  },
   stopButton: {
-    width: "100%",
-    minHeight: 52,
+    width: SHEET_WIDTH - spacing.lg * 2,
+    height: 52,
     borderRadius: radius.md,
-    borderCurve: "continuous",
-    backgroundColor: "#DC2626",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: spacing.sm,
-  },
-  stopPressed: {
-    opacity: 0.88,
-  },
-  stopLabel: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
   },
 });

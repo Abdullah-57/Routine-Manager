@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
@@ -8,6 +8,9 @@ import Animated, {
 import { spacing } from "@/theme";
 
 const BAR_COUNT = 28;
+const MIN_BAR_HEIGHT = 8;
+const MAX_BAR_HEIGHT = 64;
+const TICK_MS = 80;
 
 type VoiceWaveformProps = {
   /** Normalized 0–1 level from recorder metering (or fallback animation). */
@@ -15,58 +18,92 @@ type VoiceWaveformProps = {
   active: boolean;
 };
 
-function WaveBar({
-  index,
-  level,
-  active,
-}: {
-  index: number;
-  level: number;
-  active: boolean;
-}) {
-  const height = useSharedValue(8);
+/**
+ * How much of the wave each bar carries. Speech energy is mid-dominant, so the
+ * center bars grow the most and the edges follow quieter — like a spectrum.
+ */
+function bandWeight(index: number): number {
+  const center = (BAR_COUNT - 1) / 2;
+  return 1 - (Math.abs(index - center) / center) * 0.75;
+}
+
+const MIN_TARGETS = Array.from({ length: BAR_COUNT }, () => MIN_BAR_HEIGHT);
+
+const WaveBar = memo(function WaveBar({ target }: { target: number }) {
+  const height = useSharedValue(MIN_BAR_HEIGHT);
 
   useEffect(() => {
-    // Stagger neighboring bars so the wave looks organic.
-    const phase = (index / BAR_COUNT) * Math.PI * 2;
-    const wobble = 0.35 + 0.65 * Math.abs(Math.sin(Date.now() / 180 + phase));
-    const next = active
-      ? Math.max(8, 8 + level * wobble * 52)
-      : 8;
-    height.set(withTiming(next, { duration: 90 }));
-  }, [active, height, index, level]);
+    height.set(withTiming(target, { duration: 70 }));
+  }, [height, target]);
 
   const style = useAnimatedStyle(() => ({
     height: height.get(),
   }));
 
   return <Animated.View style={[styles.bar, style]} />;
-}
+});
 
 /**
- * Simple bar waveform driven by mic metering level.
- * Re-renders on a short interval so inactive bars still breathe slightly while active.
+ * Bar waveform driven by mic metering. expo-audio's recorder only exposes
+ * loudness (dB metering), so:
+ * - intensity: fast-attack / slow-decay envelope on the level, so bars pop
+ *   when speech starts and settle naturally between words;
+ * - pitch / timbre: rolling per-bar harmonics modulate each bar at its own
+ *   rate over the band curve, so the shape keeps shifting with the voice
+ *   instead of moving as one block.
+ * Re-renders on a short interval while active; bars animate to their targets.
  */
 export function VoiceWaveform({ level, active }: VoiceWaveformProps) {
-  const [tick, setTick] = useState(0);
+  const [targets, setTargets] = useState<number[]>(MIN_TARGETS);
+  const levelRef = useRef(level);
+  const envelopeRef = useRef(0);
+  const phaseRef = useRef(0);
 
   useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setTick((n) => n + 1), 80);
+    levelRef.current = level;
+  }, [level]);
+
+  useEffect(() => {
+    if (!active) {
+      envelopeRef.current = 0;
+      return;
+    }
+
+    const id = setInterval(() => {
+      // Fast attack, slow decay on the raw metering level.
+      envelopeRef.current = Math.max(
+        levelRef.current,
+        envelopeRef.current * 0.7,
+      );
+      phaseRef.current += TICK_MS / 1000;
+
+      setTargets(
+        Array.from({ length: BAR_COUNT }, (_, index) => {
+          const band = bandWeight(index);
+          const harmonic =
+            0.6 +
+            0.4 * Math.sin(phaseRef.current * (2.4 + band * 3.2) + index * 0.55);
+          const height =
+            MIN_BAR_HEIGHT +
+            envelopeRef.current *
+              band *
+              harmonic *
+              (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT);
+          return Math.min(MAX_BAR_HEIGHT, Math.max(MIN_BAR_HEIGHT, height));
+        }),
+      );
+    }, TICK_MS);
+
     return () => clearInterval(id);
   }, [active]);
 
-  const bars = useMemo(
-    () => Array.from({ length: BAR_COUNT }, (_, i) => i),
-    // tick forces a soft reshuffle of wobble while recording
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tick],
-  );
+  // While inactive, bars rest at the minimum height.
+  const shown = active ? targets : MIN_TARGETS;
 
   return (
     <View style={styles.row}>
-      {bars.map((index) => (
-        <WaveBar key={index} index={index} level={level} active={active} />
+      {shown.map((target, index) => (
+        <WaveBar key={index} target={target} />
       ))}
     </View>
   );
