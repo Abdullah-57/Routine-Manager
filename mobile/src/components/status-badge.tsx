@@ -4,29 +4,29 @@ import {
   View,
   type ColorValue,
 } from "react-native";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
 
 const STATUS_STYLES: Record<
   string,
   { backgroundColor: ColorValue; color: ColorValue }
 > = {
   scheduled: {
-    backgroundColor: "rgba(15, 118, 110, 0.12)",
-    color: colors.tint,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    color: "#1D4ED8",
   },
   completed: {
     backgroundColor: "rgba(5, 150, 105, 0.12)",
-    color: colors.success,
+    color: "#059669",
   },
   cancelled: {
-    backgroundColor: colors.fill,
-    color: colors.secondaryLabel,
+    backgroundColor: "#F3F4F6",
+    color: "#64748B",
   },
 };
 
 const FALLBACK: { backgroundColor: ColorValue; color: ColorValue } = {
-  backgroundColor: colors.fill,
-  color: colors.secondaryLabel,
+  backgroundColor: "#F3F4F6",
+  color: "#64748B",
 };
 
 export function StatusBadge({ status }: { status: string }) {

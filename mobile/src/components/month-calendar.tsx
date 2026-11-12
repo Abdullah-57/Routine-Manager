@@ -1,6 +1,6 @@
 import { SymbolView } from "expo-symbols";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, radius, shadows, spacing } from "@/theme";
+import { radius, shadows, spacing } from "@/theme";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -62,7 +62,7 @@ function NavChevron({ direction }: { direction: "left" | "right" }) {
       <SymbolView
         name={direction === "left" ? "chevron.left" : "chevron.right"}
         size={14}
-        tintColor={colors.tint}
+        tintColor="#2563EB"
         weight="semibold"
       />
     );
@@ -177,7 +177,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderCurve: "continuous",
     padding: spacing.md - 4,
-    backgroundColor: colors.secondaryGroupedBackground,
+    backgroundColor: "#FFFFFF",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(37, 99, 235, 0.18)",
     gap: spacing.sm,
     boxShadow: shadows.subtle,
   },
@@ -189,7 +191,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: "700",
-    color: colors.label,
+    color: "#0F172A",
   },
   navButton: {
     width: 36,
@@ -197,11 +199,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.fill,
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
   },
   navFallback: {
     fontSize: 22,
-    color: colors.tint,
+    color: "#2563EB",
     lineHeight: 24,
   },
   weekRow: {
@@ -212,7 +214,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 12,
     fontWeight: "600",
-    color: colors.tertiaryLabel,
+    color: "#64748B",
   },
   grid: {
     flexDirection: "row",
@@ -228,27 +230,27 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   cellSelected: {
-    backgroundColor: colors.tint,
+    backgroundColor: "#1D4ED8",
   },
   cellPressed: {
-    backgroundColor: colors.fill,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
   },
   dayLabel: {
     fontSize: 14,
     fontWeight: "600",
-    color: colors.label,
+    color: "#0F172A",
   },
   dayLabelSelected: {
-    color: colors.onTint,
+    color: "#FFFFFF",
   },
   dot: {
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.tint,
+    backgroundColor: "#1D4ED8",
   },
   dotSelected: {
-    backgroundColor: colors.onTint,
+    backgroundColor: "#FFFFFF",
   },
   dotPlaceholder: {
     width: 5,
