@@ -57,12 +57,16 @@ export function AiPlanComposer({
             micDisabled || !editable ? styles.disabled : null,
           ]}
         >
-          <SymbolView
-            name={{ ios: "mic.fill", android: "mic", web: "mic" }}
-            size={22}
-            tintColor="#FFFFFF"
-            fallback={<Text style={styles.micFallback}>🎙️</Text>}
-          />
+          <View style={styles.micIcon}>
+            <SymbolView
+              name={{ ios: "mic.fill", android: "mic", web: "mic" }}
+              size={22}
+              tintColor="#FFFFFF"
+              resizeMode="center"
+              style={styles.micSymbol}
+              fallback={<Text style={styles.micFallback}>🎙️</Text>}
+            />
+          </View>
         </Pressable>
       </View>
 
@@ -121,6 +125,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#2563EB",
     marginBottom: 2,
+  },
+  micIcon: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  micSymbol: {
+    width: 22,
+    height: 22,
+    transform: [{ translateX: 2 }, { translateY: 3 }],
   },
   micFallback: {
     fontSize: 12,
