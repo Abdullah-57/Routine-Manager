@@ -1,6 +1,6 @@
 import { AudioModule } from "expo-audio";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, { FadeIn } from "react-native-reanimated";
 import { ApiError, pingHealth } from "@/api/client";
 import { sendTestPush } from "@/api/notifications";
 import { listReminders, type ReminderSummary } from "@/api/reminders";
@@ -31,7 +32,7 @@ import {
 } from "@/utils/reminder-time";
 import { requestNotificationPermission } from "@/notifications/local-reminders";
 import { useAppPreferences } from "@/preferences/app-preferences";
-import { radius, shadows, spacing } from "@/theme";
+import { motion, radius, shadows, spacing } from "@/theme";
 
 type LoadState =
   | { status: "idle" }
@@ -126,6 +127,49 @@ function AgendaRow({
   );
 }
 
+/**
+ * Friendly empty/error card for the agenda list. One component covers all
+ * three list states so the tone stays consistent: loading spinner, "couldn't
+ * load" (with retry) and "nothing scheduled". FadeIn is opacity-only so it
+ * never triggers a layout pass (Reanimated, UI thread).
+ */
+function EmptyStateCard({
+  icon,
+  title,
+  body,
+  actionLabel,
+  onAction,
+}: {
+  icon: string;
+  title: string;
+  body: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <Animated.View
+      entering={FadeIn.duration(motion.enterMs).easing(motion.easeOut)}
+      style={styles.emptyCard}
+    >
+      <Text style={styles.emptyIcon}>{icon}</Text>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyBody}>{body}</Text>
+      {actionLabel && onAction ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={onAction}
+          style={({ pressed }) => [
+            styles.emptyAction,
+            pressed ? styles.emptyActionPressed : null,
+          ]}
+        >
+          <Text style={styles.emptyActionLabel}>{actionLabel}</Text>
+        </Pressable>
+      ) : null}
+    </Animated.View>
+  );
+}
+
 export function CalendarScreen() {
   const { user, token, logout } = useAuth();
   const { push } = useRouter();
@@ -146,11 +190,15 @@ export function CalendarScreen() {
   const [testPush, setTestPush] = useState<TestPushState>({ status: "idle" });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Double-submit guard: focus effect, pull-to-refresh and the Retry button
+  // all trigger fetchMonth — never let two fetches overlap.
+  const fetchInFlightRef = useRef(false);
 
   const fetchMonth = useCallback(
     async (year: number, month: number, mode: "loading" | "refreshing") => {
-      if (!token) return;
+      if (!token || fetchInFlightRef.current) return;
 
+      fetchInFlightRef.current = true;
       setLoad({ status: mode });
       try {
         const range = monthRangeISO(year, month, timezone);
@@ -163,10 +211,16 @@ export function CalendarScreen() {
             ? error.message
             : "Could not load calendar reminders.";
         setLoad({ status: "error", message });
+      } finally {
+        fetchInFlightRef.current = false;
       }
     },
     [token, timezone],
   );
+
+  const retryFetchMonth = useCallback(() => {
+    void fetchMonth(visibleMonth.year, visibleMonth.month, "refreshing");
+  }, [fetchMonth, visibleMonth.year, visibleMonth.month]);
 
   useFocusEffect(
     useCallback(() => {
@@ -375,19 +429,15 @@ export function CalendarScreen() {
         Agenda · {selectedDate}
       </ThemedText>
 
-      {load.status === "error" ? (
+      {/* When the selected day has rows, the banner owns the retry; when the
+          day is empty, the empty-state card in the list owns it instead. */}
+      {load.status === "error" && dayReminders.length > 0 ? (
         <FeedbackBanner
           tone="error"
           title="Could not refresh"
           body={load.message}
           actionLabel="Retry"
-          onAction={() =>
-            void fetchMonth(
-              visibleMonth.year,
-              visibleMonth.month,
-              "refreshing",
-            )
-          }
+          onAction={retryFetchMonth}
         />
       ) : null}
     </View>
@@ -410,13 +460,7 @@ export function CalendarScreen() {
         refreshControl={
           <RefreshControl
             refreshing={load.status === "refreshing"}
-            onRefresh={() =>
-              void fetchMonth(
-                visibleMonth.year,
-                visibleMonth.month,
-                "refreshing",
-              )
-            }
+            onRefresh={retryFetchMonth}
             tintColor="#1D4ED8"
             colors={["#2563EB"]}
           />
@@ -424,11 +468,20 @@ export function CalendarScreen() {
         ListEmptyComponent={
           load.status === "loading" ? (
             <ActivityIndicator color="#1D4ED8" style={styles.emptySpinner} />
+          ) : load.status === "error" ? (
+            <EmptyStateCard
+              icon="⚠️"
+              title="Couldn't load this day"
+              body="The calendar couldn't reach the server. Check your connection, then try again."
+              actionLabel="Try again"
+              onAction={retryFetchMonth}
+            />
           ) : (
-            <ThemedText variant="subhead" style={styles.emptyText}>
-              No reminders on this day. Create some from Home, then pull to
-              refresh.
-            </ThemedText>
+            <EmptyStateCard
+              icon="🗓️"
+              title="Nothing scheduled"
+              body="No reminders on this day. Create some from Home, then pull to refresh."
+            />
           )
         }
         renderItem={({ item }) => {
@@ -585,10 +638,46 @@ const styles = StyleSheet.create({
   agendaNotes: {
     color: "#64748B",
   },
-  emptyText: {
+  emptyCard: {
     marginHorizontal: spacing.md,
     marginTop: spacing.sm + 4,
+    alignItems: "center",
+    gap: spacing.xs,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    borderCurve: "continuous",
+    backgroundColor: "rgba(37, 99, 235, 0.05)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(37, 99, 235, 0.12)",
+  },
+  emptyIcon: {
+    fontSize: 34,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  emptyBody: {
+    fontSize: 14,
+    lineHeight: 20,
     color: "#64748B",
+    textAlign: "center",
+  },
+  emptyAction: {
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm - 2,
+    borderRadius: radius.full,
+    backgroundColor: "#1D4ED8",
+  },
+  emptyActionPressed: {
+    opacity: 0.85,
+  },
+  emptyActionLabel: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
   },
   emptySpinner: {
     marginTop: spacing.lg,

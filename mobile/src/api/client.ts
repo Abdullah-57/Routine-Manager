@@ -62,8 +62,10 @@ export async function apiFetch<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
+    // Most common cause: airplane mode / no Wi-Fi. Phrase it so a non-technical
+    // user knows exactly what to do — every screen surfaces this message.
     throw new ApiError(
-      "Network error — is the backend running and is EXPO_PUBLIC_API_URL reachable?",
+      "You seem to be offline. Check your internet connection and try again.",
       0,
       "NETWORK_ERROR",
     );
@@ -134,8 +136,9 @@ export async function apiUploadForm<T>(
       body: formData,
     });
   } catch {
+    // Same friendly offline wording as apiFetch so voice and text paths match.
     throw new ApiError(
-      "Network error — is the backend running and is EXPO_PUBLIC_API_URL reachable?",
+      "You seem to be offline. Check your internet connection and try again.",
       0,
       "NETWORK_ERROR",
     );
