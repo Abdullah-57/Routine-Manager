@@ -44,16 +44,16 @@ function normalizeFileUri(uri: string): string {
  * Uses expo-file-system native multipart upload — React Native fetch+FormData
  * file uploads often fail on Android with a generic "Network request failed".
  */
-export async function parseRoutineAudio(
+async function uploadAudioMultipart(
+  path: string,
   token: string,
   input: {
     uri: string;
     timezone?: string;
-    filename?: string;
     mimeType?: string;
   },
-): Promise<ParseRoutineResponse> {
-  const url = `${getBaseUrl()}/routines/parse`;
+): Promise<unknown> {
+  const url = `${getBaseUrl()}${path}`;
   const fileUri = normalizeFileUri(input.uri);
   const mimeType = input.mimeType ?? "audio/mp4";
 
@@ -102,5 +102,37 @@ export async function parseRoutineAudio(
     throw new ApiError(message, result.status);
   }
 
+  return data;
+}
+
+export async function parseRoutineAudio(
+  token: string,
+  input: {
+    uri: string;
+    timezone?: string;
+    filename?: string;
+    mimeType?: string;
+  },
+): Promise<ParseRoutineResponse> {
+  const data = await uploadAudioMultipart("/routines/parse", token, input);
   return data as ParseRoutineResponse;
+}
+
+/** Transcribe only — puts text in the composer; user submits separately. */
+export async function transcribeRoutineAudio(
+  token: string,
+  input: {
+    uri: string;
+    mimeType?: string;
+  },
+): Promise<{ transcript: string; transcriptionModel?: string }> {
+  const data = await uploadAudioMultipart("/routines/transcribe", token, input);
+  const payload = data as { transcript?: unknown; transcriptionModel?: string };
+  if (typeof payload.transcript !== "string" || !payload.transcript.trim()) {
+    throw new ApiError("No transcript returned from the server.", 502);
+  }
+  return {
+    transcript: payload.transcript.trim(),
+    transcriptionModel: payload.transcriptionModel,
+  };
 }

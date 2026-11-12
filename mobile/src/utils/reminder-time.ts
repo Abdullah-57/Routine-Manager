@@ -38,20 +38,25 @@ export function formatReminderTime(iso: string, timezone: string) {
   }
 }
 
-/** Clock time only (e.g. 15:00) in the given IANA timezone — never device-local by accident. */
-export function formatTimeOnly(iso: string, timezone: string) {
+/** Clock time only in the given IANA timezone — never device-local by accident. */
+export function formatTimeOnly(
+  iso: string,
+  timezone: string,
+  use24HourClock = true,
+) {
+  const hourCycle = use24HourClock ? "h23" : "h12";
   try {
     return new Intl.DateTimeFormat("en-GB", {
       timeZone: timezone,
       hour: "2-digit",
       minute: "2-digit",
-      hourCycle: "h23",
+      hourCycle,
     }).format(new Date(iso));
   } catch {
     return new Intl.DateTimeFormat("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
-      hourCycle: "h23",
+      hourCycle,
     }).format(new Date(iso));
   }
 }

@@ -1,27 +1,33 @@
+import { AudioModule } from "expo-audio";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
+  Pressable,
+  ScrollView,
   StyleSheet,
+  Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError, pingHealth } from "@/api/client";
 import { sendTestPush } from "@/api/notifications";
 import {
   listReminders,
   parseRoutine,
-  parseRoutineAudio,
+  transcribeRoutineAudio,
   type ReminderSummary,
 } from "@/api/routines";
 import { useAuth } from "@/auth/AuthContext";
+import { AiPlanComposer } from "@/components/ai-plan-composer";
+import { AssistantResponseCard } from "@/components/assistant-response-card";
+import { HomeSidebar } from "@/components/home-sidebar";
 import { StatusBadge } from "@/components/status-badge";
 import { AppButton } from "@/components/ui/app-button";
-import { AppTextField } from "@/components/ui/app-text-field";
 import { FeedbackBanner } from "@/components/ui/feedback-banner";
-import { ScreenScroll, ScreenSection } from "@/components/ui/screen";
-import { ThemedText } from "@/components/ui/themed-text";
-import { VoicePlanButton } from "@/components/voice-plan-button";
+import { VoiceRecordSheet } from "@/components/voice-record-sheet";
 import {
   cancelReminderLocalNotification,
   requestNotificationPermission,
@@ -29,7 +35,8 @@ import {
   scheduleReminderLocalNotification,
   syncLocalNotificationsForReminders,
 } from "@/notifications/local-reminders";
-import { colors, radius, shadows, spacing } from "@/theme";
+import { useAppPreferences } from "@/preferences/app-preferences";
+import { radius, shadows, spacing } from "@/theme";
 
 type PingState =
   | { status: "idle" }
@@ -51,15 +58,19 @@ type PlanState =
 
 const RECENT_PREVIEW_COUNT = 5;
 
-const timeFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-});
+function getDeviceTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
 
-function formatReminderTime(iso: string, timezone: string) {
+function formatReminderTime(
+  iso: string,
+  timezone: string,
+  use24HourClock: boolean,
+) {
   try {
     return new Intl.DateTimeFormat(undefined, {
       timeZone: timezone,
@@ -68,17 +79,17 @@ function formatReminderTime(iso: string, timezone: string) {
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
+      hour12: !use24HourClock,
     }).format(new Date(iso));
   } catch {
-    return timeFormatter.format(new Date(iso));
-  }
-}
-
-function getDeviceTimezone() {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: !use24HourClock,
+    }).format(new Date(iso));
   }
 }
 
@@ -89,6 +100,25 @@ function sortNewestFirst(items: ReminderSummary[]) {
     if (bCreated !== aCreated) return bCreated - aCreated;
     return new Date(b.startAt).getTime() - new Date(a.startAt).getTime();
   });
+}
+
+function welcomeName(user: {
+  displayName?: string;
+  email?: string;
+} | null) {
+  const display = user?.displayName?.trim();
+  if (display) return display;
+  const email = user?.email?.trim();
+  if (email) return email.split("@")[0] || email;
+  return "there";
+}
+
+function avatarLetter(user: {
+  displayName?: string;
+  email?: string;
+} | null) {
+  const name = welcomeName(user);
+  return name.charAt(0).toUpperCase() || "R";
 }
 
 function ReminderRow({
@@ -105,20 +135,12 @@ function ReminderRow({
   return (
     <View style={[styles.reminderRow, isNew ? styles.reminderRowNew : null]}>
       <View style={styles.reminderHeader}>
-        <ThemedText variant="headline" style={styles.reminderTitle}>
-          {title}
-        </ThemedText>
-        {isNew ? (
-          <ThemedText variant="caption" style={styles.newBadge}>
-            New
-          </ThemedText>
-        ) : null}
+        <Text style={styles.reminderTitle}>{title}</Text>
+        {isNew ? <Text style={styles.newBadge}>New</Text> : null}
       </View>
       <View style={styles.reminderMetaRow}>
         <StatusBadge status={status} />
-        <ThemedText variant="caption" style={styles.reminderTime}>
-          {timeLabel}
-        </ThemedText>
+        <Text style={styles.reminderTime}>{timeLabel}</Text>
       </View>
     </View>
   );
@@ -126,6 +148,9 @@ function ReminderRow({
 
 export function HomeScreen() {
   const { user, token, logout } = useAuth();
+  const prefs = useAppPreferences();
+  const insets = useSafeAreaInsets();
+
   const [planText, setPlanText] = useState("");
   const [plan, setPlan] = useState<PlanState>({ status: "idle" });
   const [allReminders, setAllReminders] = useState<ReminderSummary[]>([]);
@@ -139,6 +164,8 @@ export function HomeScreen() {
   const [testPush, setTestPush] = useState<TestPushState>({ status: "idle" });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isVoiceBusy, setIsVoiceBusy] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   const isSubmittingRef = useRef(false);
 
   const timezone = useMemo(
@@ -156,6 +183,7 @@ export function HomeScreen() {
     : sortedReminders.slice(0, RECENT_PREVIEW_COUNT);
 
   const canShowMore = sortedReminders.length > RECENT_PREVIEW_COUNT;
+  const busy = plan.status === "loading" || isVoiceBusy;
 
   const refreshReminders = useCallback(async (authToken: string) => {
     setIsLoadingReminders(true);
@@ -163,7 +191,6 @@ export function HomeScreen() {
     try {
       const { reminders } = await listReminders(authToken);
       setAllReminders(reminders);
-      // Keep on-device local alerts in sync with future scheduled reminders.
       void syncLocalNotificationsForReminders(reminders);
     } catch (error) {
       const message =
@@ -181,8 +208,8 @@ export function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!token) return;
-      // Feature 6.1: ask once (OS may no-op if already decided).
       void (async () => {
+        if (!prefs.pushNotificationsEnabled) return;
         const allowed = await requestNotificationPermission();
         if (!allowed && !notifiedPermissionRef.current) {
           notifiedPermissionRef.current = true;
@@ -193,34 +220,28 @@ export function HomeScreen() {
         }
       })();
       void refreshReminders(token);
-    }, [token, refreshReminders]),
+    }, [token, refreshReminders, prefs.pushNotificationsEnabled]),
   );
 
-  async function applyParseSuccess(
-    result: {
-      transcript?: string;
-      assistantMessage: string;
-      created: ReminderSummary[];
-      updated?: ReminderSummary[];
-      deleted?: Array<{ id: string }>;
-    },
-    options?: { keepTranscriptInBox?: boolean },
-  ) {
+  async function applyParseSuccess(result: {
+    transcript?: string;
+    assistantMessage: string;
+    created: ReminderSummary[];
+    updated?: ReminderSummary[];
+    deleted?: Array<{ id: string }>;
+  }) {
     const created = result.created ?? [];
     const updated = result.updated ?? [];
     const deleted = result.deleted ?? [];
 
-    const createdIds = new Set(created.map((item) => item.id));
-    setJustCreatedIds(createdIds);
+    setJustCreatedIds(new Set(created.map((item) => item.id)));
 
-    // Feature 7.1: keep OS local alerts aligned with create / update / delete.
     await Promise.all([
       ...created.map((item) => scheduleReminderLocalNotification(item)),
       ...updated.map(async (item) => {
         if (item.status === "scheduled") {
           await rescheduleReminderLocalNotification(item);
         } else {
-          // cancelled / completed → no future local ping
           await cancelReminderLocalNotification(item.id);
         }
       }),
@@ -242,13 +263,7 @@ export function HomeScreen() {
       status: "success",
       message: successMessage,
     });
-
-    if (options?.keepTranscriptInBox && result.transcript) {
-      // Leave text so the user can edit and re-submit if needed.
-      setPlanText(result.transcript);
-    } else {
-      setPlanText("");
-    }
+    setPlanText("");
     setShowAllReminders(false);
   }
 
@@ -303,15 +318,12 @@ export function HomeScreen() {
     setPlan({ status: "loading" });
 
     try {
-      // MVP UX from plan: record → auto-transcribe+parse → show results.
-      const result = await parseRoutineAudio(token, {
+      const result = await transcribeRoutineAudio(token, {
         uri,
-        timezone,
-        filename: "routine.m4a",
         mimeType: "audio/mp4",
       });
-      await applyParseSuccess(result, { keepTranscriptInBox: true });
-      await refreshReminders(token);
+      setPlanText(result.transcript);
+      setPlan({ status: "idle" });
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -325,9 +337,7 @@ export function HomeScreen() {
 
   async function handlePing() {
     if (ping.status === "loading") return;
-
     setPing({ status: "loading" });
-
     try {
       const data = await pingHealth();
       setPing({
@@ -343,7 +353,6 @@ export function HomeScreen() {
     }
   }
 
-  /** Feature 6.3 — backend → Expo Push → FCM → this phone. */
   async function handleTestPush() {
     if (testPush.status === "loading") return;
     if (!token) {
@@ -353,9 +362,15 @@ export function HomeScreen() {
       });
       return;
     }
+    if (!prefs.pushNotificationsEnabled) {
+      setTestPush({
+        status: "error",
+        message: "Enable Push Notifications in the sidebar first.",
+      });
+      return;
+    }
 
     setTestPush({ status: "loading" });
-
     try {
       const result = await sendTestPush(token);
       if (!result.ok || result.sent < 1) {
@@ -369,7 +384,6 @@ export function HomeScreen() {
         });
         return;
       }
-
       setTestPush({
         status: "success",
         message: `Sent ${result.sent} push(es) to ${result.deviceCount} device(s). Check the notification shade (app can stay open or backgrounded).`,
@@ -387,216 +401,343 @@ export function HomeScreen() {
     if (isLoggingOut) return;
     setIsLoggingOut(true);
     try {
+      setSidebarOpen(false);
       await logout();
     } finally {
       setIsLoggingOut(false);
     }
   }
 
+  async function handleToggleMicrophone(value: boolean) {
+    if (value) {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Microphone permission needed",
+          "Enable the microphone in system Settings to use voice plans.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Open Settings",
+              onPress: () => {
+                void Linking.openSettings();
+              },
+            },
+          ],
+        );
+        await prefs.setMicrophoneEnabled(false);
+        return;
+      }
+    }
+    await prefs.setMicrophoneEnabled(value);
+  }
+
+  async function handleTogglePush(value: boolean) {
+    if (value) {
+      const allowed = await requestNotificationPermission();
+      if (!allowed) {
+        Alert.alert(
+          "Notifications are off",
+          "Enable notifications in system Settings to receive reminders.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Open Settings",
+              onPress: () => {
+                void Linking.openSettings();
+              },
+            },
+          ],
+        );
+        await prefs.setPushNotificationsEnabled(false);
+        return;
+      }
+    }
+    await prefs.setPushNotificationsEnabled(value);
+  }
+
   return (
-    <ScreenScroll>
-      <ScreenSection>
-        <ThemedText variant="largeTitle">Plan &amp; manage</ThemedText>
-        <ThemedText variant="subhead">
-          Signed in as {user?.email ?? "your account"}. Create reminders, or
-          manage existing ones in plain language (e.g. move, cancel, delete).
-        </ThemedText>
-        <ThemedText variant="caption">Timezone: {timezone}</ThemedText>
-      </ScreenSection>
+    <View style={styles.root}>
+      <View style={styles.headerGlow} pointerEvents="none" />
 
-      <View style={styles.card}>
-        <ThemedText variant="label">Say what to create or change</ThemedText>
-        <AppTextField
-          accessibilityLabel="Plan or manage text"
-          multiline
-          placeholder="Create: Gym at 7am · Manage: Move gym to 8am · Delete gym"
-          style={styles.planInput}
-          textAlignVertical="top"
-          value={planText}
-          editable={plan.status !== "loading" && !isVoiceBusy}
-          onChangeText={(next) => {
-            setPlanText(next);
-            if (plan.status === "error") {
-              setPlan({ status: "idle" });
-            }
-          }}
-        />
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxl },
+        ]}
+      >
+        <View style={styles.topRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open settings sidebar"
+            onPress={() => setSidebarOpen(true)}
+            style={({ pressed }) => [
+              styles.avatar,
+              pressed ? styles.pressed : null,
+            ]}
+          >
+            <Text style={styles.avatarLetter}>{avatarLetter(user)}</Text>
+          </Pressable>
 
-        <VoicePlanButton
-          disabled={plan.status === "loading" || isVoiceBusy}
-          onRecorded={handleVoiceRecorded}
-          onPermissionDenied={() => {
-            setPlan({
-              status: "error",
-              message:
-                "Microphone permission is required for voice plans. Enable it in system Settings for Expo Go / this app, then try again. You can still type a plan below.",
-            });
-          }}
-          onError={(message) => {
-            setPlan({ status: "error", message });
-          }}
-        />
-
-        <AppButton
-          label="Submit plan"
-          loading={plan.status === "loading" && !isVoiceBusy}
-          disabled={plan.status === "loading" || isVoiceBusy}
-          onPress={() => {
-            void handlePlanSubmit();
-          }}
-        />
-
-        {plan.status === "loading" ? (
-          <ThemedText variant="caption">
-            Talking to the AI and saving reminders…
-          </ThemedText>
-        ) : null}
-
-        {plan.status === "error" ? (
-          <FeedbackBanner tone="error" title="Error" body={plan.message} />
-        ) : null}
-
-        {plan.status === "success" ? (
-          <FeedbackBanner tone="success" title="Saved" body={plan.message} />
-        ) : null}
-      </View>
-
-      <ScreenSection>
-        <ThemedText variant="title">
-          {showAllReminders
-            ? `All reminders (${sortedReminders.length})`
-            : `Recent reminders (${Math.min(RECENT_PREVIEW_COUNT, sortedReminders.length)} of ${sortedReminders.length})`}
-        </ThemedText>
-
-        {isLoadingReminders && sortedReminders.length === 0 ? (
-          <ActivityIndicator color={colors.tint} />
-        ) : null}
-
-        {remindersError ? (
-          <FeedbackBanner
-            tone="error"
-            title="Could not load reminders"
-            body={remindersError}
-            actionLabel="Retry"
-            onAction={() => {
-              if (token) void refreshReminders(token);
-            }}
-          />
-        ) : null}
-
-        {!remindersError &&
-        sortedReminders.length === 0 &&
-        !isLoadingReminders ? (
-          <ThemedText variant="subhead">
-            No reminders yet. Submit a plan above to create some.
-          </ThemedText>
-        ) : null}
-
-        <View style={styles.reminderList}>
-          {visibleReminders.map((item) => {
-            const startLabel = formatReminderTime(
-              item.startAt,
-              item.timezone || timezone,
-            );
-            const endLabel = item.endAt
-              ? ` → ${formatReminderTime(item.endAt, item.timezone || timezone)}`
-              : "";
-            return (
-              <ReminderRow
-                key={item.id}
-                title={item.title}
-                timeLabel={`${startLabel}${endLabel}`}
-                status={item.status}
-                isNew={justCreatedIds.has(item.id)}
-              />
-            );
-          })}
+          <View style={styles.welcomeBlock}>
+            <Text style={styles.welcomeEyebrow}>Routine Manager</Text>
+            <Text style={styles.welcomeTitle}>
+              Welcome {welcomeName(user)}
+            </Text>
+          </View>
         </View>
 
-        {canShowMore ? (
-          <AppButton
-            label={
-              showAllReminders
-                ? "Show less"
-                : `Show more (${sortedReminders.length - RECENT_PREVIEW_COUNT} more)`
-            }
-            variant="ghost"
-            onPress={() => setShowAllReminders((prev) => !prev)}
+        <View style={styles.composerCard}>
+          <AiPlanComposer
+            value={planText}
+            onChangeText={(next) => {
+              setPlanText(next);
+              if (plan.status === "error") {
+                setPlan({ status: "idle" });
+              }
+            }}
+            onPressMic={() => {
+              if (!prefs.microphoneEnabled) {
+                setPlan({
+                  status: "error",
+                  message:
+                    "Microphone Access is turned off in Settings. Enable it in the sidebar to use voice input.",
+                });
+                return;
+              }
+              setVoiceSheetOpen(true);
+            }}
+            onSubmit={() => {
+              void handlePlanSubmit();
+            }}
+            editable={!busy}
+            submitting={plan.status === "loading" && !isVoiceBusy}
+            micDisabled={!prefs.microphoneEnabled || busy}
           />
-        ) : null}
-      </ScreenSection>
 
-      <View style={styles.divider} />
+          {busy ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color="#1D4ED8" />
+              <Text style={styles.loadingText}>
+                {isVoiceBusy
+                  ? "Transcribing your voice…"
+                  : "Generating reminders…"}
+              </Text>
+            </View>
+          ) : null}
 
-      <View style={styles.tools}>
-        <ThemedText variant="label">Developer tools</ThemedText>
-        <AppButton
-          label="Ping API"
-          variant="secondary"
-          loading={ping.status === "loading"}
-          onPress={() => {
-            void handlePing();
-          }}
-        />
+          {plan.status === "error" ? (
+            <FeedbackBanner tone="error" title="Error" body={plan.message} />
+          ) : null}
 
-        {ping.status === "success" ? (
-          <FeedbackBanner tone="success" title="Success" body={ping.message} />
-        ) : null}
+          {plan.status === "success" ? (
+            <AssistantResponseCard message={plan.message} />
+          ) : null}
+        </View>
 
-        {ping.status === "error" ? (
-          <FeedbackBanner tone="error" title="Error" body={ping.message} />
-        ) : null}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {showAllReminders
+              ? `All reminders (${sortedReminders.length})`
+              : `Recent reminders (${Math.min(RECENT_PREVIEW_COUNT, sortedReminders.length)} of ${sortedReminders.length})`}
+          </Text>
 
-        <AppButton
-          label="Send test push"
-          variant="secondary"
-          loading={testPush.status === "loading"}
-          disabled={!token}
-          onPress={() => {
-            void handleTestPush();
-          }}
-        />
+          {isLoadingReminders && sortedReminders.length === 0 ? (
+            <ActivityIndicator color="#1D4ED8" />
+          ) : null}
 
-        {testPush.status === "success" ? (
-          <FeedbackBanner
-            tone="success"
-            title="Test push"
-            body={testPush.message}
-          />
-        ) : null}
+          {remindersError ? (
+            <FeedbackBanner
+              tone="error"
+              title="Could not load reminders"
+              body={remindersError}
+              actionLabel="Retry"
+              onAction={() => {
+                if (token) void refreshReminders(token);
+              }}
+            />
+          ) : null}
 
-        {testPush.status === "error" ? (
-          <FeedbackBanner
-            tone="error"
-            title="Test push error"
-            body={testPush.message}
-          />
-        ) : null}
+          {!remindersError &&
+          sortedReminders.length === 0 &&
+          !isLoadingReminders ? (
+            <Text style={styles.emptyText}>
+              No reminders yet. Submit a plan above to create some.
+            </Text>
+          ) : null}
 
-        <AppButton
-          label="Log out"
-          variant="ghost"
-          loading={isLoggingOut}
-          onPress={() => {
-            void handleLogout();
-          }}
-        />
-      </View>
-    </ScreenScroll>
+          <View style={styles.reminderList}>
+            {visibleReminders.map((item) => {
+              const startLabel = formatReminderTime(
+                item.startAt,
+                item.timezone || timezone,
+                prefs.use24HourClock,
+              );
+              const endLabel = item.endAt
+                ? ` → ${formatReminderTime(item.endAt, item.timezone || timezone, prefs.use24HourClock)}`
+                : "";
+              return (
+                <ReminderRow
+                  key={item.id}
+                  title={item.title}
+                  timeLabel={`${startLabel}${endLabel}`}
+                  status={item.status}
+                  isNew={justCreatedIds.has(item.id)}
+                />
+              );
+            })}
+          </View>
+
+          {canShowMore ? (
+            <AppButton
+              label={
+                showAllReminders
+                  ? "Show less"
+                  : `Show more (${sortedReminders.length - RECENT_PREVIEW_COUNT} more)`
+              }
+              variant="ghost"
+              onPress={() => setShowAllReminders((prev) => !prev)}
+            />
+          ) : null}
+        </View>
+      </ScrollView>
+
+      <HomeSidebar
+        visible={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        microphoneEnabled={prefs.microphoneEnabled}
+        pushNotificationsEnabled={prefs.pushNotificationsEnabled}
+        use24HourClock={prefs.use24HourClock}
+        onToggleMicrophone={(value) => {
+          void handleToggleMicrophone(value);
+        }}
+        onTogglePush={(value) => {
+          void handleTogglePush(value);
+        }}
+        onToggle24Hour={(value) => {
+          void prefs.setUse24HourClock(value);
+        }}
+        ping={ping}
+        testPush={testPush}
+        onPing={() => {
+          void handlePing();
+        }}
+        onTestPush={() => {
+          void handleTestPush();
+        }}
+        onLogout={() => {
+          void handleLogout();
+        }}
+        isLoggingOut={isLoggingOut}
+      />
+
+      <VoiceRecordSheet
+        isPresented={voiceSheetOpen}
+        onDismiss={() => setVoiceSheetOpen(false)}
+        onRecorded={handleVoiceRecorded}
+        onPermissionDenied={() => {
+          setPlan({
+            status: "error",
+            message:
+              "Microphone permission is required for voice plans. Enable it in system Settings, then try again. You can still type a plan.",
+          });
+        }}
+        onError={(message) => {
+          setPlan({ status: "error", message });
+        }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    gap: spacing.sm + 4,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    borderCurve: "continuous",
-    backgroundColor: colors.secondaryGroupedBackground,
+  root: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
+  headerGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 180,
+    experimental_backgroundImage: `
+      linear-gradient(180deg, rgba(147, 197, 253, 0.55) 0%, rgba(59, 130, 246, 0.18) 55%, rgba(255, 255, 255, 0) 100%)
+    `,
+  },
+  content: {
+    paddingHorizontal: spacing.md,
+    gap: spacing.md,
+  },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1D4ED8",
     boxShadow: shadows.subtle,
   },
-  planInput: {
-    minHeight: 120,
+  avatarLetter: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  welcomeBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  welcomeEyebrow: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    color: "#2563EB",
+    textTransform: "uppercase",
+  },
+  welcomeTitle: {
+    fontSize: 26,
+    fontWeight: "700",
+    letterSpacing: -0.4,
+    color: "#0F172A",
+  },
+  composerCard: {
+    gap: spacing.sm + 2,
+    padding: spacing.md,
+    borderRadius: radius.xl,
+    borderCurve: "continuous",
+    backgroundColor: "#FFFFFF",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(37, 99, 235, 0.18)",
+    boxShadow: shadows.subtle,
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  loadingText: {
+    flex: 1,
+    color: "#475569",
+    fontSize: 14,
+  },
+  section: {
+    gap: spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1E3A8A",
+  },
+  emptyText: {
+    color: "#64748B",
+    lineHeight: 20,
   },
   reminderList: {
     gap: spacing.sm,
@@ -607,10 +748,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md - 2,
     paddingVertical: spacing.sm + 4,
     gap: spacing.xs,
-    backgroundColor: colors.secondaryGroupedBackground,
+    backgroundColor: "rgba(37, 99, 235, 0.05)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(37, 99, 235, 0.12)",
   },
   reminderRowNew: {
-    backgroundColor: "rgba(5, 150, 105, 0.10)",
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    borderColor: "rgba(37, 99, 235, 0.35)",
   },
   reminderHeader: {
     flexDirection: "row",
@@ -620,10 +764,14 @@ const styles = StyleSheet.create({
   },
   reminderTitle: {
     flex: 1,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#0F172A",
   },
   newBadge: {
+    fontSize: 12,
     fontWeight: "700",
-    color: colors.success,
+    color: "#1D4ED8",
   },
   reminderMetaRow: {
     flexDirection: "row",
@@ -632,13 +780,11 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   reminderTime: {
+    fontSize: 13,
+    color: "#64748B",
     flexShrink: 1,
   },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.separator,
-  },
-  tools: {
-    gap: spacing.sm,
+  pressed: {
+    opacity: 0.88,
   },
 });

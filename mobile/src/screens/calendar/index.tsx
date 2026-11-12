@@ -22,6 +22,7 @@ import {
   monthRangeISO,
   todayDateKey,
 } from "@/utils/reminder-time";
+import { useAppPreferences } from "@/preferences/app-preferences";
 import { colors, radius, shadows, spacing } from "@/theme";
 
 type LoadState =
@@ -85,6 +86,7 @@ function AgendaRow({
 export function CalendarScreen() {
   const { user, token } = useAuth();
   const { push } = useRouter();
+  const { use24HourClock } = useAppPreferences();
   const timezone = user?.timezone || getDeviceTimezone();
 
   const [selectedDate, setSelectedDate] = useState(() =>
@@ -250,7 +252,11 @@ export function CalendarScreen() {
             title={item.title}
             notes={item.notes}
             status={item.status}
-            timeLabel={formatTimeOnly(item.startAt, reminderTz)}
+            timeLabel={formatTimeOnly(
+              item.startAt,
+              reminderTz,
+              use24HourClock,
+            )}
             onPressId={onPressReminder}
           />
         );

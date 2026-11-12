@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from "@/auth/AuthContext";
 import "@/notifications/handler";
 import { useNotificationNavigation } from "@/notifications/use-notification-navigation";
 import { useRegisterPushToken } from "@/notifications/use-register-push-token";
+import { AppPreferencesProvider } from "@/preferences/app-preferences";
 import { colors } from "@/theme";
 
 export { ErrorBoundary } from "expo-router";
@@ -76,8 +77,10 @@ function RootNavigator() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootNavigator />
-    </AuthProvider>
+    <AppPreferencesProvider>
+      <AuthProvider>
+        <RootNavigator />
+      </AuthProvider>
+    </AppPreferencesProvider>
   );
 }

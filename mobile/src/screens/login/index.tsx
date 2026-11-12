@@ -79,11 +79,16 @@ export function LoginScreen() {
           <FeedbackBanner tone="error" title="Could not log in" body={error} />
         ) : null}
 
-        <Host matchContents seedColor="#2563EB" style={styles.host}>
+        <Host
+          matchContents={{ vertical: true, horizontal: false }}
+          seedColor="#1D4ED8"
+          style={styles.host}
+        >
           <Button
             label={isSubmitting ? "Logging in…" : "Log in"}
             variant="filled"
             disabled={isSubmitting}
+            style={{ width: "100%", height: 52 }}
             onPress={() => {
               void handleSubmit();
             }}
@@ -144,8 +149,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   host: {
+    alignSelf: "stretch",
     width: "100%",
     marginTop: spacing.sm,
+    minHeight: 52,
   },
   footer: {
     marginTop: spacing.sm,
