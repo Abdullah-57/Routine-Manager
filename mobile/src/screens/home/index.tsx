@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -215,7 +216,9 @@ export function HomeScreen() {
           notifiedPermissionRef.current = true;
           Alert.alert(
             "Notifications are off",
-            "Open Android Settings → Apps → Routine Manager → Notifications, turn them ON, then also allow Alarms & reminders if you see that option.",
+            Platform.OS === "ios"
+              ? "Open Settings → Notifications → Routine Manager and turn Allow Notifications ON."
+              : "Open Android Settings → Apps → Routine Manager → Notifications, turn them ON, then also allow Alarms & reminders if you see that option.",
           );
         }
       })();
