@@ -18,8 +18,26 @@ export default function AuthLayout() {
         name="welcome"
         options={{ headerShown: false, animation: "fade" }}
       />
-      <Stack.Screen name="login" options={{ title: "Log in" }} />
-      <Stack.Screen name="signup" options={{ title: "Sign up" }} />
+      <Stack.Screen
+        name="login"
+        options={{
+          title: "",
+          headerTransparent: true,
+          headerTintColor: "#FFFFFF",
+          headerShadowVisible: false,
+          headerBackTitle: "Welcome",
+        }}
+      />
+      <Stack.Screen
+        name="signup"
+        options={{
+          title: "",
+          headerTransparent: true,
+          headerTintColor: "#FFFFFF",
+          headerShadowVisible: false,
+          headerBackTitle: "Log in",
+        }}
+      />
     </Stack>
   );
 }

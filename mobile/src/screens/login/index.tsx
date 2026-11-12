@@ -1,15 +1,13 @@
-import { Button } from "@expo/ui";
+import { Button, Host } from "@expo/ui";
 import { Link } from "expo-router";
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
 import { AppTextField } from "@/components/ui/app-text-field";
+import { AuthCard, AuthShell } from "@/components/ui/auth-shell";
 import { FeedbackBanner } from "@/components/ui/feedback-banner";
-import { NativeHost } from "@/components/ui/native-actions";
-import { ScreenScroll, ScreenSection } from "@/components/ui/screen";
-import { ThemedText } from "@/components/ui/themed-text";
-import { colors, radius, shadows, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
 
 export function LoginScreen() {
   const { login } = useAuth();
@@ -44,16 +42,16 @@ export function LoginScreen() {
   }
 
   return (
-    <ScreenScroll>
-      <ScreenSection>
-        <ThemedText variant="largeTitle">Log in</ThemedText>
-        <ThemedText variant="subhead">
+    <AuthShell>
+      <View style={styles.header}>
+        <Text style={styles.title}>Log in</Text>
+        <Text style={styles.subtitle}>
           Welcome back. Your session is stored securely on this device.
-        </ThemedText>
-      </ScreenSection>
+        </Text>
+      </View>
 
-      <View style={styles.card}>
-        <ThemedText variant="label">Email</ThemedText>
+      <AuthCard>
+        <Text style={styles.label}>Email</Text>
         <AppTextField
           autoCapitalize="none"
           autoComplete="email"
@@ -61,9 +59,11 @@ export function LoginScreen() {
           placeholder="you@example.com"
           value={email}
           onChangeText={setEmail}
+          style={styles.field}
+          placeholderTextColor="rgba(30, 58, 138, 0.45)"
         />
 
-        <ThemedText variant="label">Password</ThemedText>
+        <Text style={styles.label}>Password</Text>
         <AppTextField
           autoCapitalize="none"
           autoComplete="password"
@@ -71,13 +71,15 @@ export function LoginScreen() {
           secureTextEntry
           value={password}
           onChangeText={setPassword}
+          style={styles.field}
+          placeholderTextColor="rgba(30, 58, 138, 0.45)"
         />
 
         {error ? (
           <FeedbackBanner tone="error" title="Could not log in" body={error} />
         ) : null}
 
-        <NativeHost>
+        <Host matchContents seedColor="#2563EB" style={styles.host}>
           <Button
             label={isSubmitting ? "Logging in…" : "Log in"}
             variant="filled"
@@ -86,30 +88,74 @@ export function LoginScreen() {
               void handleSubmit();
             }}
           />
-        </NativeHost>
-      </View>
+        </Host>
+      </AuthCard>
 
-      <ThemedText variant="subhead">
+      <Text style={styles.footer}>
         New here?{" "}
         <Link href="/(auth)/signup" style={styles.link}>
           Create an account
         </Link>
-      </ThemedText>
-    </ScreenScroll>
+      </Text>
+    </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  header: {
+    width: "100%",
+    maxWidth: 420,
+    alignItems: "center",
     gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.lg,
+    marginBottom: spacing.xs,
+  },
+  title: {
+    fontSize: 34,
+    fontWeight: "700",
+    letterSpacing: -0.6,
+    color: "#FFFFFF",
+    textAlign: "center",
+  },
+  subtitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    color: "rgba(255, 255, 255, 0.88)",
+    textAlign: "center",
+    maxWidth: 320,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+    color: "#1E3A8A",
+    marginTop: spacing.xs,
+  },
+  field: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "rgba(37, 99, 235, 0.28)",
+    borderRadius: radius.md,
     borderCurve: "continuous",
-    backgroundColor: colors.secondaryGroupedBackground,
-    boxShadow: shadows.subtle,
+    color: "#0F172A",
+    fontSize: 17,
+    fontWeight: "500",
+    minHeight: 52,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+  },
+  host: {
+    width: "100%",
+    marginTop: spacing.sm,
+  },
+  footer: {
+    marginTop: spacing.sm,
+    fontSize: 15,
+    color: "rgba(255, 255, 255, 0.9)",
+    textAlign: "center",
   },
   link: {
-    color: colors.tint,
-    fontWeight: "600",
+    color: "#FFFFFF",
+    fontWeight: "700",
+    textDecorationLine: "underline",
   },
 });
