@@ -6,7 +6,6 @@ import {
   Pressable,
   RefreshControl,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import { ApiError } from "@/api/client";
@@ -14,6 +13,8 @@ import { listReminders, type ReminderSummary } from "@/api/reminders";
 import { useAuth } from "@/auth/AuthContext";
 import { MonthCalendar } from "@/components/month-calendar";
 import { StatusBadge } from "@/components/status-badge";
+import { FeedbackBanner } from "@/components/ui/feedback-banner";
+import { ThemedText } from "@/components/ui/themed-text";
 import {
   compareRemindersByStartAscending,
   dateKeyInTimezone,
@@ -21,6 +22,7 @@ import {
   monthRangeISO,
   todayDateKey,
 } from "@/utils/reminder-time";
+import { colors, radius, shadows, spacing } from "@/theme";
 
 type LoadState =
   | { status: "idle" }
@@ -60,13 +62,21 @@ function AgendaRow({
         pressed ? styles.agendaRowPressed : null,
       ]}
     >
-      <Text style={styles.agendaTime}>{timeLabel}</Text>
+      <ThemedText variant="headline" style={styles.agendaTime}>
+        {timeLabel}
+      </ThemedText>
       <View style={styles.agendaBody}>
         <View style={styles.agendaTitleRow}>
-          <Text style={styles.agendaTitle}>{title}</Text>
+          <ThemedText variant="headline" style={styles.agendaTitle}>
+            {title}
+          </ThemedText>
           <StatusBadge status={status} />
         </View>
-        {notes ? <Text style={styles.agendaNotes}>{notes}</Text> : null}
+        {notes ? (
+          <ThemedText variant="caption" numberOfLines={2}>
+            {notes}
+          </ThemedText>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -151,12 +161,12 @@ export function CalendarScreen() {
 
   const listHeader = (
     <View style={styles.header}>
-      <Text style={styles.title}>Calendar</Text>
-      <Text style={styles.subtitle}>
+      <ThemedText variant="largeTitle">Calendar</ThemedText>
+      <ThemedText variant="subhead">
         In-app agenda (not your phone OS calendar). Dots mark days with
         reminders.
-      </Text>
-      <Text style={styles.meta}>Timezone: {timezone}</Text>
+      </ThemedText>
+      <ThemedText variant="caption">Timezone: {timezone}</ThemedText>
 
       <MonthCalendar
         year={visibleMonth.year}
@@ -176,25 +186,24 @@ export function CalendarScreen() {
         }}
       />
 
-      <Text style={styles.sectionTitle}>Agenda · {selectedDate}</Text>
+      <ThemedText variant="title" style={styles.sectionTitle}>
+        Agenda · {selectedDate}
+      </ThemedText>
 
       {load.status === "error" ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorLabel}>Could not refresh</Text>
-          <Text style={styles.errorBody}>{load.message}</Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() =>
-              void fetchMonth(
-                visibleMonth.year,
-                visibleMonth.month,
-                "refreshing",
-              )
-            }
-          >
-            <Text style={styles.retry}>Retry</Text>
-          </Pressable>
-        </View>
+        <FeedbackBanner
+          tone="error"
+          title="Could not refresh"
+          body={load.message}
+          actionLabel="Retry"
+          onAction={() =>
+            void fetchMonth(
+              visibleMonth.year,
+              visibleMonth.month,
+              "refreshing",
+            )
+          }
+        />
       ) : null}
     </View>
   );
@@ -203,6 +212,7 @@ export function CalendarScreen() {
     <FlatList
       data={dayReminders}
       keyExtractor={(item) => item.id}
+      style={styles.list}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={styles.listContent}
       ListHeaderComponent={listHeader}
@@ -216,17 +226,18 @@ export function CalendarScreen() {
               "refreshing",
             )
           }
-          tintColor="#2563eb"
+          tintColor={colors.tint}
+          colors={[colors.seed]}
         />
       }
       ListEmptyComponent={
         load.status === "loading" ? (
-          <ActivityIndicator color="#2563eb" style={styles.emptySpinner} />
+          <ActivityIndicator color={colors.tint} style={styles.emptySpinner} />
         ) : (
-          <Text style={styles.emptyText}>
+          <ThemedText variant="subhead" style={styles.emptyText}>
             No reminders on this day. Create some from Home, then pull to
             refresh.
-          </Text>
+          </ThemedText>
         )
       }
       renderItem={({ item }) => {
@@ -249,98 +260,57 @@ export function CalendarScreen() {
 }
 
 const styles = StyleSheet.create({
+  list: {
+    flex: 1,
+    backgroundColor: colors.groupedBackground,
+  },
   listContent: {
-    paddingBottom: 40,
+    paddingBottom: spacing.xxl,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    gap: 10,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  subtitle: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: "#525252",
-  },
-  meta: {
-    fontSize: 13,
-    color: "#737373",
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    gap: spacing.sm + 2,
   },
   sectionTitle: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: "600",
+    marginTop: spacing.sm,
   },
   agendaRow: {
-    marginHorizontal: 20,
-    marginTop: 8,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
     flexDirection: "row",
-    gap: 12,
-    padding: 14,
-    borderRadius: 12,
+    gap: spacing.sm + 4,
+    padding: spacing.md - 2,
+    borderRadius: radius.md,
     borderCurve: "continuous",
-    borderWidth: 1,
-    borderColor: "#e5e5e5",
-    backgroundColor: "#fafafa",
+    backgroundColor: colors.secondaryGroupedBackground,
+    boxShadow: shadows.subtle,
   },
   agendaRowPressed: {
-    opacity: 0.85,
+    backgroundColor: colors.fill,
   },
   agendaTime: {
     width: 72,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#2563eb",
+    color: colors.tint,
   },
   agendaBody: {
     flex: 1,
-    gap: 4,
+    gap: spacing.xs,
   },
   agendaTitleRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
+    gap: spacing.sm,
   },
   agendaTitle: {
     flex: 1,
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#171717",
-  },
-  agendaNotes: {
-    fontSize: 14,
-    color: "#525252",
   },
   emptyText: {
-    marginHorizontal: 20,
-    marginTop: 12,
-    color: "#737373",
-    lineHeight: 20,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm + 4,
   },
   emptySpinner: {
-    marginTop: 20,
-  },
-  errorBox: {
-    backgroundColor: "#fef2f2",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    padding: 12,
-    gap: 4,
-  },
-  errorLabel: {
-    fontWeight: "700",
-  },
-  errorBody: {
-    color: "#404040",
-  },
-  retry: {
-    marginTop: 6,
-    color: "#2563eb",
-    fontWeight: "600",
+    marginTop: spacing.lg,
   },
 });

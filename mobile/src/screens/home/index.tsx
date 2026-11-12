@@ -3,11 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
-  ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
 import { ApiError, pingHealth } from "@/api/client";
@@ -20,6 +16,11 @@ import {
 } from "@/api/routines";
 import { useAuth } from "@/auth/AuthContext";
 import { StatusBadge } from "@/components/status-badge";
+import { AppButton } from "@/components/ui/app-button";
+import { AppTextField } from "@/components/ui/app-text-field";
+import { FeedbackBanner } from "@/components/ui/feedback-banner";
+import { ScreenScroll, ScreenSection } from "@/components/ui/screen";
+import { ThemedText } from "@/components/ui/themed-text";
 import { VoicePlanButton } from "@/components/voice-plan-button";
 import {
   cancelReminderLocalNotification,
@@ -28,6 +29,7 @@ import {
   scheduleReminderLocalNotification,
   syncLocalNotificationsForReminders,
 } from "@/notifications/local-reminders";
+import { colors, radius, shadows, spacing } from "@/theme";
 
 type PingState =
   | { status: "idle" }
@@ -103,12 +105,20 @@ function ReminderRow({
   return (
     <View style={[styles.reminderRow, isNew ? styles.reminderRowNew : null]}>
       <View style={styles.reminderHeader}>
-        <Text style={styles.reminderTitle}>{title}</Text>
-        {isNew ? <Text style={styles.newBadge}>New</Text> : null}
+        <ThemedText variant="headline" style={styles.reminderTitle}>
+          {title}
+        </ThemedText>
+        {isNew ? (
+          <ThemedText variant="caption" style={styles.newBadge}>
+            New
+          </ThemedText>
+        ) : null}
       </View>
       <View style={styles.reminderMetaRow}>
         <StatusBadge status={status} />
-        <Text style={styles.reminderTime}>{timeLabel}</Text>
+        <ThemedText variant="caption" style={styles.reminderTime}>
+          {timeLabel}
+        </ThemedText>
       </View>
     </View>
   );
@@ -384,27 +394,22 @@ export function HomeScreen() {
   }
 
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={styles.content}
-    >
-      <View style={styles.section}>
-        <Text style={styles.title}>Plan &amp; manage</Text>
-        <Text style={styles.subtitle}>
+    <ScreenScroll>
+      <ScreenSection>
+        <ThemedText variant="largeTitle">Plan &amp; manage</ThemedText>
+        <ThemedText variant="subhead">
           Signed in as {user?.email ?? "your account"}. Create reminders, or
           manage existing ones in plain language (e.g. move, cancel, delete).
-        </Text>
-        <Text style={styles.meta}>Timezone: {timezone}</Text>
-      </View>
+        </ThemedText>
+        <ThemedText variant="caption">Timezone: {timezone}</ThemedText>
+      </ScreenSection>
 
-      <View style={styles.composer}>
-        <Text style={styles.label}>Say what to create or change</Text>
-        <TextInput
+      <View style={styles.card}>
+        <ThemedText variant="label">Say what to create or change</ThemedText>
+        <AppTextField
           accessibilityLabel="Plan or manage text"
           multiline
           placeholder="Create: Gym at 7am · Manage: Move gym to 8am · Delete gym"
-          placeholderTextColor="#a3a3a3"
           style={styles.planInput}
           textAlignVertical="top"
           value={planText}
@@ -432,80 +437,59 @@ export function HomeScreen() {
           }}
         />
 
-        <Pressable
-          accessibilityRole="button"
+        <AppButton
+          label="Submit plan"
+          loading={plan.status === "loading" && !isVoiceBusy}
           disabled={plan.status === "loading" || isVoiceBusy}
           onPress={() => {
             void handlePlanSubmit();
           }}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            pressed ? styles.buttonPressed : null,
-            plan.status === "loading" || isVoiceBusy
-              ? styles.buttonDisabled
-              : null,
-          ]}
-        >
-          {plan.status === "loading" && !isVoiceBusy ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.primaryButtonLabel}>Submit plan</Text>
-          )}
-        </Pressable>
+        />
 
         {plan.status === "loading" ? (
-          <View style={styles.loadingRow}>
-            <Text style={styles.loadingText}>
-              Talking to the AI and saving reminders…
-            </Text>
-          </View>
+          <ThemedText variant="caption">
+            Talking to the AI and saving reminders…
+          </ThemedText>
         ) : null}
 
         {plan.status === "error" ? (
-          <View style={[styles.result, styles.resultError]}>
-            <Text style={styles.resultLabel}>Error</Text>
-            <Text style={styles.resultBody}>{plan.message}</Text>
-          </View>
+          <FeedbackBanner tone="error" title="Error" body={plan.message} />
         ) : null}
 
         {plan.status === "success" ? (
-          <View style={[styles.result, styles.resultSuccess]}>
-            <Text style={styles.resultLabel}>Saved</Text>
-            <Text style={styles.resultBody}>{plan.message}</Text>
-          </View>
+          <FeedbackBanner tone="success" title="Saved" body={plan.message} />
         ) : null}
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>
+      <ScreenSection>
+        <ThemedText variant="title">
           {showAllReminders
             ? `All reminders (${sortedReminders.length})`
             : `Recent reminders (${Math.min(RECENT_PREVIEW_COUNT, sortedReminders.length)} of ${sortedReminders.length})`}
-        </Text>
+        </ThemedText>
 
         {isLoadingReminders && sortedReminders.length === 0 ? (
-          <ActivityIndicator color="#2563eb" />
+          <ActivityIndicator color={colors.tint} />
         ) : null}
 
         {remindersError ? (
-          <View style={[styles.result, styles.resultError]}>
-            <Text style={styles.resultLabel}>Could not load reminders</Text>
-            <Text style={styles.resultBody}>{remindersError}</Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                if (token) void refreshReminders(token);
-              }}
-            >
-              <Text style={styles.linkLabel}>Retry</Text>
-            </Pressable>
-          </View>
+          <FeedbackBanner
+            tone="error"
+            title="Could not load reminders"
+            body={remindersError}
+            actionLabel="Retry"
+            onAction={() => {
+              if (token) void refreshReminders(token);
+            }}
+          />
         ) : null}
 
-        {!remindersError && sortedReminders.length === 0 && !isLoadingReminders ? (
-          <Text style={styles.emptyText}>
+        {!remindersError &&
+        sortedReminders.length === 0 &&
+        !isLoadingReminders ? (
+          <ThemedText variant="subhead">
             No reminders yet. Submit a plan above to create some.
-          </Text>
+          </ThemedText>
         ) : null}
 
         <View style={styles.reminderList}>
@@ -518,288 +502,143 @@ export function HomeScreen() {
               ? ` → ${formatReminderTime(item.endAt, item.timezone || timezone)}`
               : "";
             return (
-                <ReminderRow
-                  key={item.id}
-                  title={item.title}
-                  timeLabel={`${startLabel}${endLabel}`}
-                  status={item.status}
-                  isNew={justCreatedIds.has(item.id)}
-                />
+              <ReminderRow
+                key={item.id}
+                title={item.title}
+                timeLabel={`${startLabel}${endLabel}`}
+                status={item.status}
+                isNew={justCreatedIds.has(item.id)}
+              />
             );
           })}
         </View>
 
         {canShowMore ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setShowAllReminders((prev) => !prev)}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              pressed ? styles.buttonPressed : null,
-            ]}
-          >
-            <Text style={styles.secondaryButtonLabel}>
-              {showAllReminders
+          <AppButton
+            label={
+              showAllReminders
                 ? "Show less"
-                : `Show more (${sortedReminders.length - RECENT_PREVIEW_COUNT} more)`}
-            </Text>
-          </Pressable>
+                : `Show more (${sortedReminders.length - RECENT_PREVIEW_COUNT} more)`
+            }
+            variant="ghost"
+            onPress={() => setShowAllReminders((prev) => !prev)}
+          />
         ) : null}
-      </View>
+      </ScreenSection>
 
       <View style={styles.divider} />
 
-      <Pressable
-        accessibilityRole="button"
-        disabled={ping.status === "loading"}
-        onPress={handlePing}
-        style={({ pressed }) => [
-          styles.secondaryButton,
-          pressed ? styles.buttonPressed : null,
-          ping.status === "loading" ? styles.buttonDisabled : null,
-        ]}
-      >
-        {ping.status === "loading" ? (
-          <ActivityIndicator color="#2563eb" />
-        ) : (
-          <Text style={styles.secondaryButtonLabel}>Ping API</Text>
-        )}
-      </Pressable>
+      <View style={styles.tools}>
+        <ThemedText variant="label">Developer tools</ThemedText>
+        <AppButton
+          label="Ping API"
+          variant="secondary"
+          loading={ping.status === "loading"}
+          onPress={() => {
+            void handlePing();
+          }}
+        />
 
-      {ping.status === "success" ? (
-        <View style={[styles.result, styles.resultSuccess]}>
-          <Text style={styles.resultLabel}>Success</Text>
-          <Text style={styles.resultBody}>{ping.message}</Text>
-        </View>
-      ) : null}
+        {ping.status === "success" ? (
+          <FeedbackBanner tone="success" title="Success" body={ping.message} />
+        ) : null}
 
-      {ping.status === "error" ? (
-        <View style={[styles.result, styles.resultError]}>
-          <Text style={styles.resultLabel}>Error</Text>
-          <Text style={styles.resultBody}>{ping.message}</Text>
-        </View>
-      ) : null}
+        {ping.status === "error" ? (
+          <FeedbackBanner tone="error" title="Error" body={ping.message} />
+        ) : null}
 
-      <Pressable
-        accessibilityRole="button"
-        disabled={testPush.status === "loading" || !token}
-        onPress={() => {
-          void handleTestPush();
-        }}
-        style={({ pressed }) => [
-          styles.secondaryButton,
-          pressed ? styles.buttonPressed : null,
-          testPush.status === "loading" || !token
-            ? styles.buttonDisabled
-            : null,
-        ]}
-      >
-        {testPush.status === "loading" ? (
-          <ActivityIndicator color="#2563eb" />
-        ) : (
-          <Text style={styles.secondaryButtonLabel}>Send test push</Text>
-        )}
-      </Pressable>
+        <AppButton
+          label="Send test push"
+          variant="secondary"
+          loading={testPush.status === "loading"}
+          disabled={!token}
+          onPress={() => {
+            void handleTestPush();
+          }}
+        />
 
-      {testPush.status === "success" ? (
-        <View style={[styles.result, styles.resultSuccess]}>
-          <Text style={styles.resultLabel}>Test push</Text>
-          <Text style={styles.resultBody}>{testPush.message}</Text>
-        </View>
-      ) : null}
+        {testPush.status === "success" ? (
+          <FeedbackBanner
+            tone="success"
+            title="Test push"
+            body={testPush.message}
+          />
+        ) : null}
 
-      {testPush.status === "error" ? (
-        <View style={[styles.result, styles.resultError]}>
-          <Text style={styles.resultLabel}>Test push error</Text>
-          <Text style={styles.resultBody}>{testPush.message}</Text>
-        </View>
-      ) : null}
+        {testPush.status === "error" ? (
+          <FeedbackBanner
+            tone="error"
+            title="Test push error"
+            body={testPush.message}
+          />
+        ) : null}
 
-      <Pressable
-        accessibilityRole="button"
-        disabled={isLoggingOut}
-        onPress={handleLogout}
-        style={({ pressed }) => [
-          styles.secondaryButton,
-          pressed ? styles.buttonPressed : null,
-        ]}
-      >
-        {isLoggingOut ? (
-          <ActivityIndicator color="#2563eb" />
-        ) : (
-          <Text style={styles.secondaryButtonLabel}>Log out</Text>
-        )}
-      </Pressable>
-    </ScrollView>
+        <AppButton
+          label="Log out"
+          variant="ghost"
+          loading={isLoggingOut}
+          onPress={() => {
+            void handleLogout();
+          }}
+        />
+      </View>
+    </ScreenScroll>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: 20,
-    gap: 16,
-    paddingBottom: 40,
-  },
-  section: {
-    gap: 8,
-  },
-  composer: {
-    gap: 12,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  subtitle: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: "#525252",
-  },
-  meta: {
-    fontSize: 13,
-    color: "#737373",
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#404040",
+  card: {
+    gap: spacing.sm + 4,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderCurve: "continuous",
+    backgroundColor: colors.secondaryGroupedBackground,
+    boxShadow: shadows.subtle,
   },
   planInput: {
     minHeight: 120,
-    borderWidth: 1,
-    borderColor: "#d4d4d4",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    lineHeight: 22,
-    backgroundColor: "#ffffff",
-  },
-  primaryButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2563eb",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    minHeight: 48,
-    paddingHorizontal: 16,
-  },
-  primaryButtonLabel: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  loadingText: {
-    color: "#525252",
-    flex: 1,
   },
   reminderList: {
-    gap: 8,
+    gap: spacing.sm,
   },
   reminderRow: {
-    borderWidth: 1,
-    borderColor: "#e5e5e5",
-    borderRadius: 12,
+    borderRadius: radius.md,
     borderCurve: "continuous",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 4,
-    backgroundColor: "#fafafa",
+    paddingHorizontal: spacing.md - 2,
+    paddingVertical: spacing.sm + 4,
+    gap: spacing.xs,
+    backgroundColor: colors.secondaryGroupedBackground,
   },
   reminderRowNew: {
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
+    backgroundColor: "rgba(5, 150, 105, 0.10)",
   },
   reminderHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
+    gap: spacing.sm,
   },
   reminderTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#171717",
     flex: 1,
   },
   newBadge: {
-    fontSize: 12,
     fontWeight: "700",
-    color: "#15803d",
+    color: colors.success,
   },
   reminderMetaRow: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: 8,
+    gap: spacing.sm,
   },
   reminderTime: {
-    fontSize: 14,
-    color: "#525252",
     flexShrink: 1,
   },
-  emptyText: {
-    color: "#737373",
-    lineHeight: 20,
-  },
-  linkLabel: {
-    marginTop: 8,
-    color: "#2563eb",
-    fontWeight: "600",
-  },
-  secondaryButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    minHeight: 48,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: "#2563eb",
-  },
-  buttonPressed: {
-    opacity: 0.85,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  secondaryButtonLabel: {
-    color: "#2563eb",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  result: {
-    borderRadius: 12,
-    borderCurve: "continuous",
-    padding: 14,
-    gap: 4,
-  },
-  resultSuccess: {
-    backgroundColor: "#ecfdf5",
-  },
-  resultError: {
-    backgroundColor: "#fef2f2",
-  },
-  resultLabel: {
-    fontWeight: "700",
-  },
-  resultBody: {
-    color: "#404040",
-    lineHeight: 20,
-  },
   divider: {
-    height: 1,
-    backgroundColor: "#e5e5e5",
-    marginVertical: 4,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.separator,
+  },
+  tools: {
+    gap: spacing.sm,
   },
 });

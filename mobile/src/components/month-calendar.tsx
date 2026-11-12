@@ -1,4 +1,6 @@
+import { SymbolView } from "expo-symbols";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { colors, radius, shadows, spacing } from "@/theme";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -54,6 +56,22 @@ const monthTitleFormatter = new Intl.DateTimeFormat(undefined, {
   timeZone: "UTC",
 });
 
+function NavChevron({ direction }: { direction: "left" | "right" }) {
+  if (process.env.EXPO_OS === "ios") {
+    return (
+      <SymbolView
+        name={direction === "left" ? "chevron.left" : "chevron.right"}
+        size={14}
+        tintColor={colors.tint}
+        weight="semibold"
+      />
+    );
+  }
+  return (
+    <Text style={styles.navFallback}>{direction === "left" ? "‹" : "›"}</Text>
+  );
+}
+
 export function MonthCalendar({
   year,
   month,
@@ -73,6 +91,7 @@ export function MonthCalendar({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Previous month"
+          hitSlop={8}
           onPress={() => {
             const next = shiftMonth(year, month, -1);
             onChangeMonth(next.year, next.month);
@@ -82,12 +101,13 @@ export function MonthCalendar({
             pressed ? styles.pressed : null,
           ]}
         >
-          <Text style={styles.navLabel}>‹</Text>
+          <NavChevron direction="left" />
         </Pressable>
         <Text style={styles.title}>{title}</Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Next month"
+          hitSlop={8}
           onPress={() => {
             const next = shiftMonth(year, month, 1);
             onChangeMonth(next.year, next.month);
@@ -97,7 +117,7 @@ export function MonthCalendar({
             pressed ? styles.pressed : null,
           ]}
         >
-          <Text style={styles.navLabel}>›</Text>
+          <NavChevron direction="right" />
         </Pressable>
       </View>
 
@@ -126,7 +146,7 @@ export function MonthCalendar({
               style={({ pressed }) => [
                 styles.cell,
                 selected ? styles.cellSelected : null,
-                pressed ? styles.pressed : null,
+                pressed && !selected ? styles.cellPressed : null,
               ]}
             >
               <Text
@@ -137,7 +157,13 @@ export function MonthCalendar({
               >
                 {cell.label}
               </Text>
-              {marked ? <View style={styles.dot} /> : <View style={styles.dotPlaceholder} />}
+              {marked ? (
+                <View
+                  style={[styles.dot, selected ? styles.dotSelected : null]}
+                />
+              ) : (
+                <View style={styles.dotPlaceholder} />
+              )}
             </Pressable>
           );
         })}
@@ -148,13 +174,12 @@ export function MonthCalendar({
 
 const styles = StyleSheet.create({
   wrap: {
-    borderWidth: 1,
-    borderColor: "#e5e5e5",
-    borderRadius: 12,
+    borderRadius: radius.lg,
     borderCurve: "continuous",
-    padding: 12,
-    backgroundColor: "#ffffff",
-    gap: 8,
+    padding: spacing.md - 4,
+    backgroundColor: colors.secondaryGroupedBackground,
+    gap: spacing.sm,
+    boxShadow: shadows.subtle,
   },
   header: {
     flexDirection: "row",
@@ -164,19 +189,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#171717",
+    color: colors.label,
   },
   navButton: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: radius.full,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: colors.fill,
   },
-  navLabel: {
+  navFallback: {
     fontSize: 22,
-    color: "#2563eb",
+    color: colors.tint,
     lineHeight: 24,
   },
   weekRow: {
@@ -187,7 +212,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 12,
     fontWeight: "600",
-    color: "#737373",
+    color: colors.tertiaryLabel,
   },
   grid: {
     flexDirection: "row",
@@ -197,33 +222,39 @@ const styles = StyleSheet.create({
     width: "14.2857%",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 8,
-    borderRadius: 10,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
     borderCurve: "continuous",
-    gap: 4,
+    gap: spacing.xs,
   },
   cellSelected: {
-    backgroundColor: "#2563eb",
+    backgroundColor: colors.tint,
+  },
+  cellPressed: {
+    backgroundColor: colors.fill,
   },
   dayLabel: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#171717",
+    color: colors.label,
   },
   dayLabelSelected: {
-    color: "#ffffff",
+    color: colors.onTint,
   },
   dot: {
-    width: 6,
-    height: 6,
+    width: 5,
+    height: 5,
     borderRadius: 3,
-    backgroundColor: "#93c5fd",
+    backgroundColor: colors.tint,
+  },
+  dotSelected: {
+    backgroundColor: colors.onTint,
   },
   dotPlaceholder: {
-    width: 6,
-    height: 6,
+    width: 5,
+    height: 5,
   },
   pressed: {
-    opacity: 0.85,
+    opacity: 0.75,
   },
 });

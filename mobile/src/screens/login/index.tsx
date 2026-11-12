@@ -1,16 +1,15 @@
+import { Button } from "@expo/ui";
 import { Link } from "expo-router";
 import { useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { StyleSheet, View } from "react-native";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
+import { AppTextField } from "@/components/ui/app-text-field";
+import { FeedbackBanner } from "@/components/ui/feedback-banner";
+import { NativeHost } from "@/components/ui/native-actions";
+import { ScreenScroll, ScreenSection } from "@/components/ui/screen";
+import { ThemedText } from "@/components/ui/themed-text";
+import { colors, radius, shadows, spacing } from "@/theme";
 
 export function LoginScreen() {
   const { login } = useAuth();
@@ -45,132 +44,72 @@ export function LoginScreen() {
   }
 
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={styles.content}
-    >
-      <View style={styles.section}>
-        <Text style={styles.title}>Log in</Text>
-        <Text style={styles.subtitle}>
+    <ScreenScroll>
+      <ScreenSection>
+        <ThemedText variant="largeTitle">Log in</ThemedText>
+        <ThemedText variant="subhead">
           Welcome back. Your session is stored securely on this device.
-        </Text>
-      </View>
+        </ThemedText>
+      </ScreenSection>
 
-      <View style={styles.form}>
-        <Text style={styles.label}>Email</Text>
-        <TextInput
+      <View style={styles.card}>
+        <ThemedText variant="label">Email</ThemedText>
+        <AppTextField
           autoCapitalize="none"
           autoComplete="email"
           keyboardType="email-address"
           placeholder="you@example.com"
-          style={styles.input}
           value={email}
           onChangeText={setEmail}
         />
 
-        <Text style={styles.label}>Password</Text>
-        <TextInput
+        <ThemedText variant="label">Password</ThemedText>
+        <AppTextField
           autoCapitalize="none"
           autoComplete="password"
           placeholder="Password"
           secureTextEntry
-          style={styles.input}
           value={password}
           onChangeText={setPassword}
         />
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? (
+          <FeedbackBanner tone="error" title="Could not log in" body={error} />
+        ) : null}
 
-        <Pressable
-          accessibilityRole="button"
-          disabled={isSubmitting}
-          onPress={handleSubmit}
-          style={({ pressed }) => [
-            styles.button,
-            pressed ? styles.buttonPressed : null,
-            isSubmitting ? styles.buttonDisabled : null,
-          ]}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.buttonLabel}>Log in</Text>
-          )}
-        </Pressable>
+        <NativeHost>
+          <Button
+            label={isSubmitting ? "Logging in…" : "Log in"}
+            variant="filled"
+            disabled={isSubmitting}
+            onPress={() => {
+              void handleSubmit();
+            }}
+          />
+        </NativeHost>
       </View>
 
-      <Text style={styles.footer}>
+      <ThemedText variant="subhead">
         New here?{" "}
         <Link href="/(auth)/signup" style={styles.link}>
           Create an account
         </Link>
-      </Text>
-    </ScrollView>
+      </ThemedText>
+    </ScreenScroll>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: 20,
-    gap: 20,
-  },
-  section: {
-    gap: 8,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  subtitle: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: "#525252",
-  },
-  form: {
-    gap: 10,
-  },
-  label: {
-    fontWeight: "600",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#d4d4d4",
-    borderRadius: 12,
+  card: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.lg,
     borderCurve: "continuous",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: "#ffffff",
-  },
-  error: {
-    color: "#b91c1c",
-  },
-  button: {
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2563eb",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    minHeight: 48,
-    marginTop: 8,
-  },
-  buttonPressed: {
-    opacity: 0.85,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonLabel: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  footer: {
-    color: "#525252",
+    backgroundColor: colors.secondaryGroupedBackground,
+    boxShadow: shadows.subtle,
   },
   link: {
-    color: "#2563eb",
+    color: colors.tint,
     fontWeight: "600",
   },
 });

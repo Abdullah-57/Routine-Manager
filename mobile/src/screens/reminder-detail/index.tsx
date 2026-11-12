@@ -4,10 +4,8 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { ApiError } from "@/api/client";
@@ -19,6 +17,11 @@ import {
   type ReminderSummary,
 } from "@/api/reminders";
 import { useAuth } from "@/auth/AuthContext";
+import { AppButton } from "@/components/ui/app-button";
+import { AppTextField } from "@/components/ui/app-text-field";
+import { FeedbackBanner } from "@/components/ui/feedback-banner";
+import { ScreenScroll } from "@/components/ui/screen";
+import { ThemedText } from "@/components/ui/themed-text";
 import {
   cancelReminderLocalNotification,
   rescheduleReminderLocalNotification,
@@ -28,6 +31,7 @@ import {
   fromLocalDateTimeInput,
   toLocalDateTimeInput,
 } from "@/utils/reminder-time";
+import { colors, radius, shadows, spacing } from "@/theme";
 
 type LoadState =
   | { status: "loading" }
@@ -223,38 +227,36 @@ export function ReminderDetailScreen() {
   }
 
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={styles.content}
-    >
+    <ScreenScroll>
       {load.status === "loading" ? (
-        <ActivityIndicator color="#2563eb" />
+        <ActivityIndicator color={colors.tint} />
       ) : null}
 
       {load.status === "error" ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorLabel}>Error</Text>
-          <Text style={styles.errorBody}>{load.message}</Text>
-          <Pressable accessibilityRole="button" onPress={() => void loadReminder()}>
-            <Text style={styles.link}>Retry</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" onPress={() => back()}>
-            <Text style={styles.link}>Go back</Text>
-          </Pressable>
-        </View>
+        <FeedbackBanner
+          tone="error"
+          title="Error"
+          body={load.message}
+          actionLabel="Retry"
+          onAction={() => {
+            void loadReminder();
+          }}
+        />
+      ) : null}
+
+      {load.status === "error" ? (
+        <AppButton label="Go back" variant="ghost" onPress={() => back()} />
       ) : null}
 
       {load.status === "ready" ? (
-        <View style={styles.form}>
-          <Text style={styles.heading}>Edit reminder</Text>
-          <Text style={styles.meta}>
+        <View style={styles.card}>
+          <ThemedText variant="largeTitle">Edit reminder</ThemedText>
+          <ThemedText variant="caption">
             Source: {load.reminder.source} · TZ: {timezone}
-          </Text>
+          </ThemedText>
 
-          <Text style={styles.label}>Title</Text>
-          <TextInput
-            style={styles.input}
+          <ThemedText variant="label">Title</ThemedText>
+          <AppTextField
             value={title}
             onChangeText={(next) => {
               setTitle(next);
@@ -264,9 +266,9 @@ export function ReminderDetailScreen() {
             editable={!isSaving && !isDeleting}
           />
 
-          <Text style={styles.label}>Notes</Text>
-          <TextInput
-            style={[styles.input, styles.notesInput]}
+          <ThemedText variant="label">Notes</ThemedText>
+          <AppTextField
+            style={styles.notesInput}
             multiline
             textAlignVertical="top"
             value={notes}
@@ -278,7 +280,7 @@ export function ReminderDetailScreen() {
             editable={!isSaving && !isDeleting}
           />
 
-          <Text style={styles.label}>Status</Text>
+          <ThemedText variant="label">Status</ThemedText>
           <View style={styles.statusRow}>
             {STATUS_OPTIONS.map((option) => {
               const selected = status === option;
@@ -311,12 +313,11 @@ export function ReminderDetailScreen() {
             })}
           </View>
 
-          <Text style={styles.label}>Start (local)</Text>
-          <Text style={styles.help}>Format: YYYY-MM-DDTHH:mm</Text>
-          <TextInput
+          <ThemedText variant="label">Start (local)</ThemedText>
+          <ThemedText variant="caption">Format: YYYY-MM-DDTHH:mm</ThemedText>
+          <AppTextField
             autoCapitalize="none"
             autoCorrect={false}
-            style={styles.input}
             value={startLocal}
             onChangeText={(next) => {
               setStartLocal(next);
@@ -325,7 +326,7 @@ export function ReminderDetailScreen() {
             }}
             editable={!isSaving && !isDeleting}
           />
-          <Text style={styles.preview}>
+          <ThemedText variant="caption">
             Preview:{" "}
             {fromLocalDateTimeInput(startLocal, timezone)
               ? formatReminderTime(
@@ -333,15 +334,13 @@ export function ReminderDetailScreen() {
                   timezone,
                 )
               : "invalid"}
-          </Text>
+          </ThemedText>
 
-          <Text style={styles.label}>End (optional)</Text>
-          <TextInput
+          <ThemedText variant="label">End (optional)</ThemedText>
+          <AppTextField
             autoCapitalize="none"
             autoCorrect={false}
-            style={styles.input}
             placeholder="Leave blank for none"
-            placeholderTextColor="#a3a3a3"
             value={endLocal}
             onChangeText={(next) => {
               setEndLocal(next);
@@ -352,101 +351,43 @@ export function ReminderDetailScreen() {
           />
 
           {formError ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorLabel}>Error</Text>
-              <Text style={styles.errorBody}>{formError}</Text>
-            </View>
+            <FeedbackBanner tone="error" title="Error" body={formError} />
           ) : null}
 
           {saveMessage ? (
-            <View style={styles.successBox}>
-              <Text style={styles.successLabel}>Saved</Text>
-              <Text style={styles.successBody}>{saveMessage}</Text>
-            </View>
+            <FeedbackBanner tone="success" title="Saved" body={saveMessage} />
           ) : null}
 
-          <Pressable
-            accessibilityRole="button"
-            disabled={isSaving || isDeleting}
+          <AppButton
+            label="Save changes"
+            loading={isSaving}
+            disabled={isDeleting}
             onPress={() => {
               void handleSave();
             }}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed ? styles.pressed : null,
-              isSaving ? styles.disabled : null,
-            ]}
-          >
-            {isSaving ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.primaryButtonLabel}>Save changes</Text>
-            )}
-          </Pressable>
+          />
 
-          <Pressable
-            accessibilityRole="button"
-            disabled={isSaving || isDeleting}
+          <AppButton
+            label="Delete reminder"
+            variant="danger"
+            loading={isDeleting}
+            disabled={isSaving}
             onPress={confirmDelete}
-            style={({ pressed }) => [
-              styles.dangerButton,
-              pressed ? styles.pressed : null,
-              isDeleting ? styles.disabled : null,
-            ]}
-          >
-            {isDeleting ? (
-              <ActivityIndicator color="#b91c1c" />
-            ) : (
-              <Text style={styles.dangerButtonLabel}>Delete reminder</Text>
-            )}
-          </Pressable>
+          />
         </View>
       ) : null}
-    </ScrollView>
+    </ScreenScroll>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: 20,
-    gap: 16,
-    paddingBottom: 40,
-  },
-  form: {
-    gap: 10,
-  },
-  heading: {
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  meta: {
-    color: "#737373",
-    fontSize: 13,
-    marginBottom: 4,
-  },
-  label: {
-    marginTop: 6,
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#404040",
-  },
-  help: {
-    fontSize: 12,
-    color: "#737373",
-  },
-  preview: {
-    fontSize: 13,
-    color: "#525252",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#d4d4d4",
-    borderRadius: 12,
+  card: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.lg,
     borderCurve: "continuous",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: "#ffffff",
+    backgroundColor: colors.secondaryGroupedBackground,
+    boxShadow: shadows.subtle,
   },
   notesInput: {
     minHeight: 90,
@@ -454,90 +395,26 @@ const styles = StyleSheet.create({
   statusRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: spacing.sm,
   },
   statusChip: {
-    borderWidth: 1,
-    borderColor: "#d4d4d4",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#fafafa",
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.fill,
   },
   statusChipSelected: {
-    borderColor: "#2563eb",
-    backgroundColor: "#2563eb",
+    backgroundColor: colors.tint,
   },
   statusChipLabel: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#404040",
+    color: colors.secondaryLabel,
   },
   statusChipLabelSelected: {
-    color: "#ffffff",
-  },
-  primaryButton: {
-    marginTop: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2563eb",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    minHeight: 48,
-  },
-  primaryButtonLabel: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  dangerButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: "#b91c1c",
-  },
-  dangerButtonLabel: {
-    color: "#b91c1c",
-    fontSize: 16,
-    fontWeight: "600",
+    color: colors.onTint,
   },
   pressed: {
     opacity: 0.85,
-  },
-  disabled: {
-    opacity: 0.7,
-  },
-  errorBox: {
-    backgroundColor: "#fef2f2",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    padding: 14,
-    gap: 6,
-  },
-  errorLabel: {
-    fontWeight: "700",
-  },
-  errorBody: {
-    color: "#404040",
-  },
-  successBox: {
-    backgroundColor: "#ecfdf5",
-    borderRadius: 12,
-    borderCurve: "continuous",
-    padding: 14,
-    gap: 4,
-  },
-  successLabel: {
-    fontWeight: "700",
-  },
-  successBody: {
-    color: "#404040",
-  },
-  link: {
-    color: "#2563eb",
-    fontWeight: "600",
   },
 });

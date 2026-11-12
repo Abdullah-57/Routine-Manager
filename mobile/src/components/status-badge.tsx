@@ -1,30 +1,32 @@
-import { StyleSheet, Text, View } from "react-native";
+import {
+  StyleSheet,
+  Text,
+  View,
+  type ColorValue,
+} from "react-native";
+import { colors, radius, spacing } from "@/theme";
 
 const STATUS_STYLES: Record<
   string,
-  { backgroundColor: string; color: string; borderColor: string }
+  { backgroundColor: ColorValue; color: ColorValue }
 > = {
   scheduled: {
-    backgroundColor: "#eff6ff",
-    color: "#1d4ed8",
-    borderColor: "#bfdbfe",
+    backgroundColor: "rgba(15, 118, 110, 0.12)",
+    color: colors.tint,
   },
   completed: {
-    backgroundColor: "#ecfdf5",
-    color: "#047857",
-    borderColor: "#a7f3d0",
+    backgroundColor: "rgba(5, 150, 105, 0.12)",
+    color: colors.success,
   },
   cancelled: {
-    backgroundColor: "#f5f5f5",
-    color: "#525252",
-    borderColor: "#d4d4d4",
+    backgroundColor: colors.fill,
+    color: colors.secondaryLabel,
   },
 };
 
-const FALLBACK = {
-  backgroundColor: "#f5f5f5",
-  color: "#525252",
-  borderColor: "#d4d4d4",
+const FALLBACK: { backgroundColor: ColorValue; color: ColorValue } = {
+  backgroundColor: colors.fill,
+  color: colors.secondaryLabel,
 };
 
 export function StatusBadge({ status }: { status: string }) {
@@ -32,15 +34,7 @@ export function StatusBadge({ status }: { status: string }) {
   const label = status || "scheduled";
 
   return (
-    <View
-      style={[
-        styles.badge,
-        {
-          backgroundColor: tone.backgroundColor,
-          borderColor: tone.borderColor,
-        },
-      ]}
-    >
+    <View style={[styles.badge, { backgroundColor: tone.backgroundColor }]}>
       <Text style={[styles.label, { color: tone.color }]}>{label}</Text>
     </View>
   );
@@ -48,9 +42,8 @@ export function StatusBadge({ status }: { status: string }) {
 
 const styles = StyleSheet.create({
   badge: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 8,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
     alignSelf: "flex-start",
   },

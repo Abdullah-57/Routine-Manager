@@ -5,6 +5,7 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from "expo-audio";
+import { SymbolView } from "expo-symbols";
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,6 +14,15 @@ import {
   Text,
   View,
 } from "react-native";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from "react-native-reanimated";
+import { ThemedText } from "@/components/ui/themed-text";
+import { colors, motion, radius, spacing } from "@/theme";
 
 type VoicePhase = "idle" | "recording" | "uploading";
 
@@ -37,10 +47,32 @@ export function VoicePlanButton({
   const recorderState = useAudioRecorderState(recorder);
   const [phase, setPhase] = useState<VoicePhase>("idle");
   const busyRef = useRef(false);
+  const pulse = useSharedValue(1);
 
   const isRecording = phase === "recording" || recorderState.isRecording;
   const isUploading = phase === "uploading";
   const isBusy = disabled || isUploading;
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: pulse.get(),
+  }));
+
+  function startPulse() {
+    pulse.set(
+      withRepeat(
+        withTiming(0.55, {
+          duration: 700,
+          easing: Easing.inOut(Easing.ease),
+        }),
+        -1,
+        true,
+      ),
+    );
+  }
+
+  function stopPulse() {
+    pulse.set(withTiming(1, { duration: motion.pressMs }));
+  }
 
   async function startRecording() {
     if (busyRef.current || isBusy) return;
@@ -61,6 +93,7 @@ export function VoicePlanButton({
       await recorder.prepareToRecordAsync();
       recorder.record();
       setPhase("recording");
+      startPulse();
     } catch (error) {
       const message =
         error instanceof Error
@@ -68,6 +101,7 @@ export function VoicePlanButton({
           : "Could not start the microphone.";
       onError(message);
       setPhase("idle");
+      stopPulse();
     } finally {
       busyRef.current = false;
     }
@@ -76,6 +110,7 @@ export function VoicePlanButton({
   async function stopAndUpload() {
     if (busyRef.current) return;
     busyRef.current = true;
+    stopPulse();
     setPhase("uploading");
 
     try {
@@ -102,41 +137,54 @@ export function VoicePlanButton({
 
   return (
     <View style={styles.wrap}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={
-          isRecording ? "Stop recording" : "Record voice plan"
-        }
-        disabled={isBusy && !isRecording}
-        onPress={() => {
-          if (isRecording) {
-            void stopAndUpload();
-          } else {
-            void startRecording();
+      <Animated.View style={isRecording ? pulseStyle : undefined}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            isRecording ? "Stop recording" : "Record voice plan"
           }
-        }}
-        style={({ pressed }) => [
-          styles.button,
-          isRecording ? styles.buttonRecording : null,
-          pressed ? styles.pressed : null,
-          isBusy && !isRecording ? styles.disabled : null,
-        ]}
-      >
-        {isUploading ? (
-          <ActivityIndicator color="#ffffff" />
-        ) : (
-          <Text style={styles.label}>
-            {isRecording ? "Stop & plan from voice" : "Record voice plan"}
-          </Text>
-        )}
-      </Pressable>
+          disabled={isBusy && !isRecording}
+          onPress={() => {
+            if (isRecording) {
+              void stopAndUpload();
+            } else {
+              void startRecording();
+            }
+          }}
+          style={({ pressed }) => [
+            styles.button,
+            isRecording ? styles.buttonRecording : null,
+            pressed ? styles.pressed : null,
+            isBusy && !isRecording ? styles.disabled : null,
+          ]}
+        >
+          {isUploading ? (
+            <ActivityIndicator color={colors.onTint} />
+          ) : (
+            <View style={styles.row}>
+              {process.env.EXPO_OS === "ios" ? (
+                <SymbolView
+                  name={isRecording ? "stop.fill" : "mic.fill"}
+                  size={18}
+                  tintColor={colors.onTint}
+                />
+              ) : null}
+              <Text style={styles.label}>
+                {isRecording ? "Stop & plan from voice" : "Record voice plan"}
+              </Text>
+            </View>
+          )}
+        </Pressable>
+      </Animated.View>
       {isRecording ? (
-        <Text style={styles.hint}>Listening… tap again when you finish.</Text>
+        <ThemedText variant="caption">
+          Listening… tap again when you finish.
+        </ThemedText>
       ) : null}
       {isUploading ? (
-        <Text style={styles.hint}>
+        <ThemedText variant="caption">
           Transcribing and creating reminders…
-        </Text>
+        </ThemedText>
       ) : null}
     </View>
   );
@@ -144,34 +192,35 @@ export function VoicePlanButton({
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: 8,
+    gap: spacing.sm,
   },
   button: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0f766e",
-    borderRadius: 12,
+    backgroundColor: colors.tint,
+    borderRadius: radius.md,
     borderCurve: "continuous",
     minHeight: 48,
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.md,
   },
   buttonRecording: {
-    backgroundColor: "#b91c1c",
+    backgroundColor: colors.danger,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   label: {
-    color: "#ffffff",
+    color: colors.onTint,
     fontSize: 16,
     fontWeight: "600",
   },
-  hint: {
-    color: "#525252",
-    fontSize: 14,
-    lineHeight: 20,
-  },
   pressed: {
-    opacity: 0.85,
+    opacity: 0.9,
+    transform: [{ scale: motion.pressScale }],
   },
   disabled: {
-    opacity: 0.7,
+    opacity: 0.55,
   },
 });

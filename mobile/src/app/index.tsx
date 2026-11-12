@@ -8,5 +8,5 @@ export default function Index() {
     return null;
   }
 
-  return <Redirect href={token ? "/(tabs)" : "/(auth)/login"} />;
+  return <Redirect href={token ? "/(tabs)" : "/(auth)/welcome"} />;
 }
