@@ -9,6 +9,7 @@ import { transcribeAudio } from "../services/whisper";
 const parseTextSchema = z.object({
   text: z.string().trim().min(1),
   timezone: z.string().trim().optional(),
+  sessionId: z.string().trim().optional(),
 });
 
 const ALLOWED_AUDIO_MIME = new Set([
@@ -113,6 +114,7 @@ routinesRouter.post("/parse", maybeAudioUpload, async (req, res) => {
     const timezone = resolveTimezone(req.body, req);
     const file = req.file;
     let text = "";
+    let sessionId: string | undefined;
     let inputType: "text" | "audio" = "text";
     let transcriptionModel: string | undefined;
 
@@ -125,22 +127,27 @@ routinesRouter.post("/parse", maybeAudioUpload, async (req, res) => {
       text = transcribed.transcript;
       transcriptionModel = transcribed.model;
       inputType = "audio";
+      if (typeof req.body?.sessionId === "string" && req.body.sessionId.trim()) {
+        sessionId = req.body.sessionId.trim();
+      }
     } else {
       const parsed = parseTextSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({
           error:
-            "Provide JSON { text, timezone? } or multipart form fields audio + timezone",
+            "Provide JSON { text, timezone?, sessionId? } or multipart form fields audio + timezone",
           details: parsed.error.flatten(),
         });
       }
       text = parsed.data.text;
+      sessionId = parsed.data.sessionId;
     }
 
     const result = await parseRoutineWithTools({
       userId: req.user!.id,
       text,
       timezone,
+      sessionId,
       inputType,
     });
 

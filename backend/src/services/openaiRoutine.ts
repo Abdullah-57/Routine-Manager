@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import OpenAI from "openai";
 import { AiSession } from "../models/AiSession";
 import { listRemindersForUser, startDateAndTimeInTimezone } from "./reminders";
@@ -136,6 +137,11 @@ function buildSystemPrompt(timezone: string, now: Date) {
     "D) 'Move X to 8am' / 'change X to ...' -> update_reminder with the new startAtISO (keep title unless asked to rename).",
     "E) 'Cancel X' -> update_reminder status=cancelled (keep the row). 'Delete/remove X' -> delete_reminder.",
     "F) Do not create a duplicate when the user clearly asked to change an existing item.",
+    "G) MULTI-UTTERANCE & PRONOUN RESOLUTION (CRITICAL):",
+    "   - In a multi-utterance conversation session, the user often refers to recently created or discussed reminders using pronouns or relative phrases like 'that one', 'it', 'move it', 'cancel that', 'the first one', 'change it to...', 'make it 10am instead'.",
+    "   - Always resolve 'that one', 'it', 'that' to the most recently created or modified reminder in this conversation session!",
+    "   - Match its id against the Existing upcoming reminders list and call update_reminder or delete_reminder directly.",
+    "   - Never create a duplicate reminder when the user says 'move that one to ...' or 'make it ... instead'.",
     "",
     `User timezone: ${timezone}`,
     `Current UTC offset for that timezone: ${offset}`,
@@ -272,28 +278,73 @@ export type ParseRoutineResult = {
   sessionId?: string;
 };
 
-export async function parseRoutineWithTools(input: {
+export type ParseRoutineInput = {
   userId: string;
   text: string;
   timezone: string;
+  sessionId?: string;
   inputType?: "text" | "audio";
-}): Promise<ParseRoutineResult> {
+};
+
+export async function parseRoutineWithTools(
+  input: ParseRoutineInput,
+): Promise<ParseRoutineResult> {
   const client = getOpenAIClient();
   const model = getModel();
   const now = new Date();
   const inputType = input.inputType ?? "text";
+  const incomingSessionId = input.sessionId?.trim();
 
+  // 1. Try to find an existing active session (within last 30 minutes)
+  let existingSession = null;
+  if (incomingSessionId) {
+    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
+    existingSession = await AiSession.findOne({
+      userId: input.userId,
+      sessionId: incomingSessionId,
+      updatedAt: { $gte: thirtyMinutesAgo },
+    });
+  }
+
+  // 2. Fetch fresh upcoming reminders from DB (always reflects latest edits/deletions)
   const existingContext = await buildExistingRemindersContext(
     input.userId,
     input.timezone,
     now,
   );
 
+  // 3. Reconstruct dialogue history for seamless multi-utterance context
+  const previousDialogueMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  let multiTurnSessionContext = "";
+
+  if (existingSession && existingSession.turns && existingSession.turns.length > 0) {
+    const recentTurns = existingSession.turns.slice(-10);
+    for (const turn of recentTurns) {
+      if (turn.role === "user") {
+        previousDialogueMessages.push({ role: "user", content: turn.content });
+      } else if (turn.role === "assistant") {
+        previousDialogueMessages.push({ role: "assistant", content: turn.content });
+      }
+    }
+
+    multiTurnSessionContext = [
+      "",
+      "ACTIVE MULTI-TURN CONVERSATION SESSION:",
+      `- This is a continuing hands-free conversation with the user in the same session (sessionId: ${incomingSessionId}).`,
+      "- The user may refer to reminders from prior turns using pronouns or references like 'that one', 'it', 'move it', 'cancel that', 'the first one', or 'change it to...'.",
+      "- Always resolve such references to the relevant reminder mentioned or created in previous turns above.",
+      "- Update or reschedule the existing reminder rather than creating a duplicate reminder.",
+    ].join("\n");
+  }
+
+  const systemPromptContent = `${buildSystemPrompt(input.timezone, now)}\n\n${existingContext}${multiTurnSessionContext}`;
+
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     {
       role: "system",
-      content: `${buildSystemPrompt(input.timezone, now)}\n\n${existingContext}`,
+      content: systemPromptContent,
     },
+    ...previousDialogueMessages,
     { role: "user", content: input.text },
   ];
 
@@ -369,14 +420,45 @@ export async function parseRoutineWithTools(input: {
     now,
   );
 
-  const session = await AiSession.create({
-    userId: input.userId,
-    inputType,
-    rawTranscript: input.text,
-    model,
-    toolCalls,
-    assistantMessage,
-  });
+  const targetSessionId =
+    incomingSessionId || new Types.ObjectId().toString();
+
+  if (existingSession) {
+    existingSession.turns.push(
+      { role: "user", content: input.text, createdAt: now },
+      {
+        role: "assistant",
+        content: assistantMessage,
+        toolCalls,
+        createdAt: now,
+      },
+    );
+    existingSession.rawTranscript = `${existingSession.rawTranscript}\n${input.text}`.trim();
+    existingSession.assistantMessage = assistantMessage;
+    for (const tc of toolCalls) {
+      existingSession.toolCalls.push(tc);
+    }
+    await existingSession.save();
+  } else {
+    await AiSession.create({
+      userId: input.userId,
+      sessionId: targetSessionId,
+      inputType,
+      rawTranscript: input.text,
+      model,
+      toolCalls,
+      assistantMessage,
+      turns: [
+        { role: "user", content: input.text, createdAt: now },
+        {
+          role: "assistant",
+          content: assistantMessage,
+          toolCalls,
+          createdAt: now,
+        },
+      ],
+    });
+  }
 
   return {
     transcript: input.text,
@@ -386,6 +468,6 @@ export async function parseRoutineWithTools(input: {
     deleted: affect.deleted,
     model,
     toolCalls,
-    sessionId: session._id.toString(),
+    sessionId: targetSessionId,
   };
 }

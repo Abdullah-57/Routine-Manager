@@ -9,6 +9,16 @@ const toolCallSchema = new Schema(
   { _id: false },
 );
 
+const turnSchema = new Schema(
+  {
+    role: { type: String, enum: ["user", "assistant"], required: true },
+    content: { type: String, required: true },
+    toolCalls: { type: [toolCallSchema], default: [] },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 const aiSessionSchema = new Schema(
   {
     userId: {
@@ -17,18 +27,26 @@ const aiSessionSchema = new Schema(
       required: true,
       index: true,
     },
+    sessionId: {
+      type: String,
+      index: true,
+    },
     inputType: {
       type: String,
       enum: ["text", "audio"],
       default: "text",
     },
+    turns: {
+      type: [turnSchema],
+      default: [],
+    },
     rawTranscript: {
       type: String,
-      required: true,
+      default: "",
     },
     model: {
       type: String,
-      required: true,
+      default: "gpt-4o-mini",
     },
     toolCalls: {
       type: [toolCallSchema],
@@ -40,7 +58,7 @@ const aiSessionSchema = new Schema(
     },
   },
   {
-    timestamps: { createdAt: true, updatedAt: false },
+    timestamps: true,
   },
 );
 

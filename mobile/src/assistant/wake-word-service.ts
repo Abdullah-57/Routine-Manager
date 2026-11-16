@@ -173,6 +173,16 @@ export function isClosingPhrase(text: string): boolean {
     "we are done",
     "finished",
     "all set",
+    "all done",
+    "all finished",
+    "that's it",
+    "thats it",
+    "that is it",
+    "we're done",
+    "were done",
+    "nope that's all",
+    "nope thats all",
+    "nope",
     "exit",
   ];
   return (

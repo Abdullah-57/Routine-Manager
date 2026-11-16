@@ -22,7 +22,7 @@ export type ParseRoutineResponse = {
 
 export function parseRoutine(
   token: string,
-  input: { text: string; timezone?: string },
+  input: { text: string; timezone?: string; sessionId?: string },
 ) {
   return apiFetch<ParseRoutineResponse>("/routines/parse", {
     method: "POST",
@@ -51,6 +51,7 @@ async function uploadAudioMultipart(
     uri: string;
     timezone?: string;
     mimeType?: string;
+    sessionId?: string;
   },
 ): Promise<unknown> {
   const url = `${getBaseUrl()}${path}`;
@@ -59,14 +60,19 @@ async function uploadAudioMultipart(
 
   let result;
   try {
+    const parameters: Record<string, string> = {
+      timezone: input.timezone ?? "UTC",
+    };
+    if (input.sessionId) {
+      parameters.sessionId = input.sessionId;
+    }
+
     result = await uploadAsync(url, fileUri, {
       httpMethod: "POST",
       uploadType: FileSystemUploadType.MULTIPART,
       fieldName: "audio",
       mimeType,
-      parameters: {
-        timezone: input.timezone ?? "UTC",
-      },
+      parameters,
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",

@@ -464,25 +464,44 @@ export function AssistantOverlay({
             {createdReminders.length > 0 ? (
               <View style={styles.remindersContainer}>
                 <Text style={styles.remindersHeader}>
-                  Scheduled ({createdReminders.length}):
+                  Session Reminders ({createdReminders.length}):
                 </Text>
                 <View style={styles.chipGrid}>
-                  {createdReminders.map((reminder) => (
-                    <View key={reminder.id} style={styles.reminderChip}>
-                      <Text style={styles.chipEmoji}>⏰</Text>
-                      <View style={styles.chipTextContainer}>
-                        <Text style={styles.chipTitle} numberOfLines={1}>
-                          {reminder.title}
+                  {createdReminders.map((reminder) => {
+                    const isCancelled = reminder.status === "cancelled";
+                    return (
+                      <View
+                        key={reminder.id}
+                        style={[
+                          styles.reminderChip,
+                          isCancelled ? styles.reminderChipCancelled : null,
+                        ]}
+                      >
+                        <Text style={styles.chipEmoji}>
+                          {isCancelled ? "🚫" : "⏰"}
                         </Text>
-                        <Text style={styles.chipTime}>
-                          {new Date(reminder.startAt).toLocaleTimeString([], {
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })}
-                        </Text>
+                        <View style={styles.chipTextContainer}>
+                          <Text
+                            style={[
+                              styles.chipTitle,
+                              isCancelled ? styles.chipTitleCancelled : null,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {reminder.title}
+                          </Text>
+                          <Text style={styles.chipTime}>
+                            {isCancelled
+                              ? "Cancelled"
+                              : new Date(reminder.startAt).toLocaleTimeString([], {
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                })}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </View>
             ) : null}
@@ -809,6 +828,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     gap: 6,
   },
+  reminderChipCancelled: {
+    opacity: 0.6,
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+  },
   chipEmoji: {
     fontSize: 14,
   },
@@ -820,6 +843,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.label,
     maxWidth: 160,
+  },
+  chipTitleCancelled: {
+    textDecorationLine: "line-through",
+    color: colors.secondaryLabel,
   },
   chipTime: {
     fontSize: 11,

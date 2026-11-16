@@ -205,6 +205,7 @@ export function HomeScreen() {
   assistantOverlayOpenRef.current = assistantOverlayOpen;
   const isTtsSpeakingRef = useRef(isTtsSpeaking);
   isTtsSpeakingRef.current = isTtsSpeaking;
+  const assistantSessionIdRef = useRef<string | null>(null);
 
   const [followUpWakeDetected, setFollowUpWakeDetected] = useState(false);
 
@@ -223,6 +224,7 @@ export function HomeScreen() {
     setAssistantOverlayOpen(false);
     setAssistantPhase("listening");
     setAssistantLiveTranscript("");
+    assistantSessionIdRef.current = null;
     wakeWordRef.current?.clearTranscript();
   }, [clearAssistantIdleTimer]);
 
@@ -353,10 +355,33 @@ export function HomeScreen() {
     setPlanText("");
     setShowAllReminders(false);
 
-    // Feature 1.2: If assistant session is active, read the confirmation aloud via native TTS
-    // and keep listening for follow-up edits or additions hands-free
+    // Feature 1.3: If assistant session is active, read the confirmation aloud via native TTS
+    // and keep listening for follow-up multi-utterance additions or edits hands-free
     if (assistantOverlayOpenRef.current) {
-      setAssistantCreatedReminders(created);
+      setAssistantCreatedReminders((prev) => {
+        let next = [...prev];
+        // Add newly created reminders
+        for (const item of created) {
+          if (!next.some((r) => r.id === item.id)) {
+            next.push(item);
+          }
+        }
+        // Update modified reminders
+        for (const item of updated) {
+          const index = next.findIndex((r) => r.id === item.id);
+          if (index >= 0) {
+            next[index] = item;
+          } else {
+            next.push(item);
+          }
+        }
+        // Remove deleted reminders
+        if (deleted.length > 0) {
+          const deletedIds = new Set(deleted.map((d) => d.id));
+          next = next.filter((r) => !deletedIds.has(r.id));
+        }
+        return next;
+      });
       setAssistantSpokenMessage(baseMessage);
       setAssistantPhase("responding");
 
@@ -446,7 +471,14 @@ export function HomeScreen() {
       setPlan({ status: "loading" });
 
       try {
-        const result = await parseRoutine(token, { text, timezone });
+        const result = await parseRoutine(token, {
+          text,
+          timezone,
+          sessionId: assistantSessionIdRef.current || undefined,
+        });
+        if (result.sessionId) {
+          assistantSessionIdRef.current = result.sessionId;
+        }
         await applyParseSuccess(result);
         await refreshReminders(token);
       } catch (error) {
@@ -598,9 +630,12 @@ export function HomeScreen() {
 
       clearAssistantIdleTimer();
       setFollowUpWakeDetected(false);
+      if (!assistantOverlayOpenRef.current) {
+        assistantSessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        setAssistantCreatedReminders([]);
+      }
       setAssistantOverlayOpen(true);
       setAssistantSpokenMessage("");
-      setAssistantCreatedReminders([]);
       setAssistantError(null);
 
       const cleanTrailing = stripLeadingWakePhrase(
