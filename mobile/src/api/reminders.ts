@@ -11,6 +11,13 @@ export type ReminderSummary = {
   status: string;
   source: string;
   localNotificationId: string | null;
+  kind?: "simple" | "meeting" | "call" | "custom";
+  action?: {
+    type?: "meeting_link" | "email" | "call" | "none";
+    status?: "pending" | "done" | "failed";
+    meetLink?: string | null;
+    attendees?: Array<{ name?: string | null; email?: string | null; inviteSentAt?: string | null }>;
+  } | null;
   createdAt?: string;
   updatedAt?: string;
 };

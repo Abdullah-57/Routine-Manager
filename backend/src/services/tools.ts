@@ -1,4 +1,7 @@
 import type OpenAI from "openai";
+import { findContact } from "./contacts";
+import { sendEmailMessage } from "./email";
+import { generateMeetingLink } from "./meetingLinks";
 import {
   createRemindersForUser,
   deleteReminderForUser,
@@ -41,6 +44,25 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
                   description: "ISO-8601 datetime with offset",
                 },
                 endAtISO: { type: "string" },
+                kind: {
+                  type: "string",
+                  enum: ["simple", "meeting", "call", "custom"],
+                  description: "Kind of reminder. Use 'meeting' when scheduling meetings.",
+                },
+                meetLink: {
+                  type: "string",
+                  description: "Video meeting link generated via create_meeting_link",
+                },
+                attendees: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      email: { type: "string" },
+                    },
+                  },
+                },
               },
               required: ["title", "startAtISO"],
               additionalProperties: false,
@@ -108,6 +130,70 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "find_contact",
+      description:
+        "Look up a person's contact email or phone number by name from the user's contacts. Call this when scheduling a meeting, sending an email, or making a call to someone whose contact info is needed.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "The person's name to search for, e.g. 'Alex'",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_meeting_link",
+      description:
+        "Generate an instant encrypted video conference meeting link (Google Meet / Jitsi Meet) for a scheduled meeting.",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: {
+            type: "string",
+            description: "Meeting topic or title, e.g. 'Meeting with Alex'",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "send_email",
+      description:
+        "Send an email message or meeting invitation to a recipient. Call this after finding the contact's email or when an email address is provided.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {
+            type: "string",
+            description: "Recipient email address",
+          },
+          subject: {
+            type: "string",
+            description: "Email subject line",
+          },
+          body: {
+            type: "string",
+            description: "Email body content",
+          },
+        },
+        required: ["to", "subject", "body"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 type ToolContext = {
@@ -123,6 +209,9 @@ async function executeCreateReminders(args: unknown, ctx: ToolContext) {
       notes?: string;
       startAtISO: string;
       endAtISO?: string;
+      kind?: "simple" | "meeting" | "call" | "custom";
+      meetLink?: string;
+      attendees?: Array<{ name?: string; email?: string }>;
     }>;
   };
 
@@ -174,6 +263,21 @@ async function executeListReminders(args: unknown, ctx: ToolContext) {
   return { reminders };
 }
 
+async function executeFindContact(args: unknown, ctx: ToolContext) {
+  const payload = args as { name: string };
+  return findContact(ctx.userId, payload.name);
+}
+
+async function executeCreateMeetingLink(args: unknown, ctx: ToolContext) {
+  const payload = args as { topic?: string };
+  return generateMeetingLink(ctx.userId, payload.topic);
+}
+
+async function executeSendEmail(args: unknown, ctx: ToolContext) {
+  const payload = args as { to: string; subject: string; body: string };
+  return sendEmailMessage(ctx.userId, payload.to, payload.subject, payload.body);
+}
+
 export async function executeToolCall(
   name: string,
   rawArguments: string,
@@ -210,6 +314,15 @@ export async function executeToolCall(
         break;
       case "list_reminders":
         result = await executeListReminders(parsedArgs, ctx);
+        break;
+      case "find_contact":
+        result = await executeFindContact(parsedArgs, ctx);
+        break;
+      case "create_meeting_link":
+        result = await executeCreateMeetingLink(parsedArgs, ctx);
+        break;
+      case "send_email":
+        result = await executeSendEmail(parsedArgs, ctx);
         break;
       default:
         result = { error: `Unknown tool: ${name}` };

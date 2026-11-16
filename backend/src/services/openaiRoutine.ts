@@ -143,6 +143,15 @@ function buildSystemPrompt(timezone: string, now: Date) {
     "   - Match its id against the Existing upcoming reminders list and call update_reminder or delete_reminder directly.",
     "   - Never create a duplicate reminder when the user says 'move that one to ...' or 'make it ... instead'.",
     "",
+    "H) ACTION-AWARE MEETINGS & INVITES (FOLLOW STRICTLY):",
+    "   - When the user asks to schedule a meeting, call, or appointment with a person (e.g. 'Schedule a meeting with Alex at 5 PM', 'Set up a call with Sarah'):",
+    "     1. Call find_contact with the person's name (e.g. name='Alex') to retrieve their email address.",
+    "     2. Call create_meeting_link with the topic (e.g. topic='Meeting with Alex') to generate a video conference link.",
+    "     3. If find_contact found an email address: call send_email to send the invitation with the meeting link.",
+    "     4. Call create_reminders with kind='meeting', title='Meeting with Alex', startAtISO, meetLink, and attendees: [{ name: 'Alex', email: contact.email }]. Include the meeting link in the reminder notes.",
+    "     5. If find_contact returned ambiguous contacts, still generate the meeting link, schedule the reminder, and ask the user to clarify which person to invite.",
+    "     6. If no contact is found, still generate the meeting link, schedule the reminder with kind='meeting', and inform the user.",
+    "",
     `User timezone: ${timezone}`,
     `Current UTC offset for that timezone: ${offset}`,
     `Today's date in user timezone (YYYY-MM-DD): ${today}`,
@@ -205,7 +214,12 @@ function buildFactualAssistantMessage(
     if (affect.created.length === 1) {
       const item = affect.created[0];
       const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
-      parts.push(`I've scheduled ${item.title} for ${when}.`);
+      if (item.kind === "meeting" || item.action?.meetLink) {
+        const attendee = item.action?.attendees?.[0]?.email ? ` and sent the invite to ${item.action.attendees[0].email}` : "";
+        parts.push(`I've scheduled ${item.title} for ${when} with a meeting link${attendee}.`);
+      } else {
+        parts.push(`I've scheduled ${item.title} for ${when}.`);
+      }
     } else {
       const itemsList = affect.created
         .map(

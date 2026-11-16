@@ -1,6 +1,7 @@
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef } from "react";
 import {
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -469,17 +470,35 @@ export function AssistantOverlay({
                 <View style={styles.chipGrid}>
                   {createdReminders.map((reminder) => {
                     const isCancelled = reminder.status === "cancelled";
+                    const isMeeting =
+                      reminder.kind === "meeting" ||
+                      Boolean(reminder.action?.meetLink);
+                    const isCall = reminder.kind === "call";
+                    const meetLink = reminder.action?.meetLink;
+                    const emoji = isCancelled
+                      ? "🚫"
+                      : isMeeting
+                        ? "🎥"
+                        : isCall
+                          ? "📞"
+                          : "⏰";
+
                     return (
-                      <View
+                      <Pressable
                         key={reminder.id}
+                        disabled={!meetLink}
+                        onPress={() => {
+                          if (meetLink) {
+                            void Linking.openURL(meetLink).catch(() => {});
+                          }
+                        }}
                         style={[
                           styles.reminderChip,
                           isCancelled ? styles.reminderChipCancelled : null,
+                          isMeeting ? styles.reminderChipMeeting : null,
                         ]}
                       >
-                        <Text style={styles.chipEmoji}>
-                          {isCancelled ? "🚫" : "⏰"}
-                        </Text>
+                        <Text style={styles.chipEmoji}>{emoji}</Text>
                         <View style={styles.chipTextContainer}>
                           <Text
                             style={[
@@ -490,16 +509,23 @@ export function AssistantOverlay({
                           >
                             {reminder.title}
                           </Text>
-                          <Text style={styles.chipTime}>
-                            {isCancelled
-                              ? "Cancelled"
-                              : new Date(reminder.startAt).toLocaleTimeString([], {
-                                  hour: "numeric",
-                                  minute: "2-digit",
-                                })}
-                          </Text>
+                          <View style={styles.chipMetaRow}>
+                            <Text style={styles.chipTime}>
+                              {isCancelled
+                                ? "Cancelled"
+                                : new Date(reminder.startAt).toLocaleTimeString([], {
+                                    hour: "numeric",
+                                    minute: "2-digit",
+                                  })}
+                            </Text>
+                            {meetLink ? (
+                              <View style={styles.meetLinkBadge}>
+                                <Text style={styles.meetLinkBadgeText}>Tap to Join</Text>
+                              </View>
+                            ) : null}
+                          </View>
                         </View>
-                      </View>
+                      </Pressable>
                     );
                   })}
                 </View>
@@ -831,6 +857,27 @@ const styles = StyleSheet.create({
   reminderChipCancelled: {
     opacity: 0.6,
     backgroundColor: "rgba(239, 68, 68, 0.08)",
+  },
+  reminderChipMeeting: {
+    backgroundColor: "rgba(15, 118, 110, 0.12)",
+    borderColor: "rgba(15, 118, 110, 0.25)",
+    borderWidth: 1,
+  },
+  chipMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  meetLinkBadge: {
+    backgroundColor: colors.tint,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: radius.full,
+  },
+  meetLinkBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
   chipEmoji: {
     fontSize: 14,

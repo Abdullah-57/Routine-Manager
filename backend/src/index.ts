@@ -8,6 +8,7 @@ import { notificationsRouter } from "./routes/notifications";
 import { remindersRouter } from "./routes/reminders";
 import { routinesRouter } from "./routes/routines";
 import { integrationsRouter } from "./routes/integrations";
+import { contactsRouter } from "./routes/contacts";
 
 const app = express();
 const port = Number(process.env.PORT) || 4000;
@@ -28,6 +29,7 @@ app.use("/notifications", notificationsRouter);
 app.use("/reminders", remindersRouter);
 app.use("/routines", routinesRouter);
 app.use("/integrations", integrationsRouter);
+app.use("/contacts", contactsRouter);
 
 async function start() {
   if (!process.env.JWT_SECRET) {

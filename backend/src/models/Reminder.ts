@@ -44,6 +44,34 @@ const reminderSchema = new Schema(
       type: String,
       trim: true,
     },
+    kind: {
+      type: String,
+      enum: ["simple", "meeting", "call", "custom"],
+      default: "simple",
+    },
+    action: {
+      type: {
+        type: String,
+        enum: ["meeting_link", "email", "call", "none"],
+        default: "none",
+      },
+      status: {
+        type: String,
+        enum: ["pending", "done", "failed"],
+        default: "done",
+      },
+      meetLink: {
+        type: String,
+        trim: true,
+      },
+      attendees: [
+        {
+          name: { type: String, trim: true },
+          email: { type: String, trim: true },
+          inviteSentAt: { type: Date },
+        },
+      ],
+    },
   },
   {
     timestamps: true,

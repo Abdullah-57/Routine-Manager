@@ -12,6 +12,13 @@ export type ReminderDto = {
   status: string;
   source: string;
   localNotificationId: string | null;
+  kind?: string | null;
+  action?: {
+    type?: string | null;
+    status?: string | null;
+    meetLink?: string | null;
+    attendees?: Array<{ name?: string | null; email?: string | null; inviteSentAt?: Date | null }>;
+  } | null;
   createdAt?: Date;
   updatedAt?: Date;
 };
@@ -27,6 +34,13 @@ export function toReminderDto(reminder: {
   status: string;
   source: string;
   localNotificationId?: string | null;
+  kind?: string | null;
+  action?: {
+    type?: string | null;
+    status?: string | null;
+    meetLink?: string | null;
+    attendees?: any;
+  } | null;
   createdAt?: Date;
   updatedAt?: Date;
 }): ReminderDto {
@@ -41,6 +55,21 @@ export function toReminderDto(reminder: {
     status: reminder.status,
     source: reminder.source,
     localNotificationId: reminder.localNotificationId ?? null,
+    kind: reminder.kind ?? "simple",
+    action: reminder.action
+      ? {
+          type: reminder.action.type ?? "none",
+          status: reminder.action.status ?? "done",
+          meetLink: reminder.action.meetLink ?? null,
+          attendees: Array.isArray(reminder.action.attendees)
+            ? reminder.action.attendees.map((a: any) => ({
+                name: a.name ?? "",
+                email: a.email ?? "",
+                inviteSentAt: a.inviteSentAt,
+              }))
+            : [],
+        }
+      : null,
     createdAt: reminder.createdAt,
     updatedAt: reminder.updatedAt,
   };
@@ -115,6 +144,9 @@ export async function createRemindersForUser(
     notes?: string;
     startAtISO: string;
     endAtISO?: string;
+    kind?: "simple" | "meeting" | "call" | "custom";
+    meetLink?: string;
+    attendees?: Array<{ name?: string; email?: string }>;
   }>,
 ): Promise<{
   created: ReminderDto[];
@@ -142,6 +174,21 @@ export async function createRemindersForUser(
       throw new Error(`endAt must be after startAt for "${item.title}"`);
     }
 
+    const hasMeetLink = Boolean(item.meetLink);
+    const kind = item.kind || (hasMeetLink ? "meeting" : "simple");
+    const action = hasMeetLink || (item.attendees && item.attendees.length > 0)
+      ? {
+          type: (hasMeetLink ? "meeting_link" : "email") as "meeting_link" | "email",
+          status: "done" as const,
+          meetLink: item.meetLink,
+          attendees: (item.attendees || []).map((a) => ({
+            name: a.name || "",
+            email: a.email || "",
+            inviteSentAt: new Date(),
+          })),
+        }
+      : undefined;
+
     return {
       userId,
       title: item.title.trim(),
@@ -149,6 +196,8 @@ export async function createRemindersForUser(
       startAt,
       endAt,
       timezone,
+      kind,
+      action,
       status: "scheduled" as const,
       source: "ai" as const,
       startAtISO: startAt.toISOString(),
