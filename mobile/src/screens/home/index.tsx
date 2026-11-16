@@ -29,6 +29,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { AppButton } from "@/components/ui/app-button";
 import { FeedbackBanner } from "@/components/ui/feedback-banner";
 import { VoiceRecordSheet } from "@/components/voice-record-sheet";
+import { FloatingAssistantBubble } from "@/components/floating-assistant-bubble";
 import {
   cancelReminderLocalNotification,
   requestNotificationPermission,
@@ -659,6 +660,23 @@ export function HomeScreen() {
     [clearAssistantIdleTimer, submitPlanText, prefs.wakePhrase],
   );
 
+  const handleOpenAssistantManually = useCallback(() => {
+    clearAssistantIdleTimer();
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+      () => {},
+    );
+    assistantSessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    setAssistantCreatedReminders([]);
+    setAssistantSpokenMessage("");
+    setAssistantError(null);
+    setFollowUpWakeDetected(true);
+    setAssistantLiveTranscript("");
+    setAssistantPhase("listening");
+    setAssistantOverlayOpen(true);
+    wakeWordRef.current?.clearTranscript();
+    startAssistantIdleTimer();
+  }, [clearAssistantIdleTimer, startAssistantIdleTimer]);
+
   const wakeWord = useWakeWord({
     enabled: prefs.assistantEnabled && prefs.microphoneEnabled,
     wakePhrase: prefs.wakePhrase,
@@ -1157,6 +1175,17 @@ export function HomeScreen() {
         onClose={() => {
           handleCloseAssistant();
         }}
+      />
+
+      <FloatingAssistantBubble
+        visible={
+          prefs.assistantEnabled &&
+          !assistantOverlayOpen &&
+          !voiceSheetOpen &&
+          !sidebarOpen
+        }
+        isListening={wakeWord.isListening}
+        onPress={handleOpenAssistantManually}
       />
     </View>
   );
