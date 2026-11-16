@@ -1,5 +1,5 @@
 import { Host, Switch } from "@expo/ui";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -8,6 +8,9 @@ import {
   Text,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
+import { useAuth } from "@/auth/AuthContext";
+import { getGoogleStatus, type GoogleStatusResponse } from "@/api/integrations";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -96,6 +99,17 @@ export function HomeSidebar({
 }: HomeSidebarProps) {
   const insets = useSafeAreaInsets();
   const progress = useSharedValue(0);
+  const router = useRouter();
+  const { token } = useAuth();
+  const [googleStatus, setGoogleStatus] = useState<GoogleStatusResponse | null>(null);
+
+  useEffect(() => {
+    if (visible && token) {
+      void getGoogleStatus(token)
+        .then((res) => setGoogleStatus(res))
+        .catch(() => undefined);
+    }
+  }, [visible, token]);
 
   useEffect(() => {
     progress.set(
@@ -237,6 +251,61 @@ export function HomeSidebar({
                   </View>
                 </View>
               ) : null}
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.connectedAccountsBlock}>
+              <Text style={styles.sectionLabel}>Connected Accounts</Text>
+              <Pressable
+                style={styles.accountCard}
+                onPress={() => {
+                  onClose();
+                  router.push("/settings/connections");
+                }}
+              >
+                <View style={styles.accountCardLeft}>
+                  <View style={styles.googleIconCircle}>
+                    <Text style={styles.googleIconText}>G</Text>
+                  </View>
+                  <View style={styles.accountCardMeta}>
+                    <Text style={styles.accountCardTitle}>Google Account</Text>
+                    <Text style={styles.accountCardSubtitle} numberOfLines={1}>
+                      {googleStatus?.connected && googleStatus.integration
+                        ? googleStatus.integration.email
+                        : "Contacts & meeting invites"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.accountPill,
+                    googleStatus?.connected
+                      ? styles.accountPillConnected
+                      : styles.accountPillDisconnected,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.accountDot,
+                      googleStatus?.connected
+                        ? styles.accountDotConnected
+                        : styles.accountDotDisconnected,
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.accountPillText,
+                      googleStatus?.connected
+                        ? styles.accountPillTextConnected
+                        : styles.accountPillTextDisconnected,
+                    ]}
+                  >
+                    {googleStatus?.connected ? "Linked" : "Link"}
+                  </Text>
+                </View>
+              </Pressable>
             </View>
 
             <View style={styles.divider} />
@@ -459,6 +528,86 @@ const styles = StyleSheet.create({
     color: "#0F172A",
     textTransform: "uppercase",
     marginBottom: spacing.xs,
+  },
+  connectedAccountsBlock: {
+    gap: spacing.xs,
+  },
+  accountCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: radius.md,
+    padding: spacing.sm,
+  },
+  accountCardLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    flex: 1,
+    marginRight: spacing.xs,
+  },
+  googleIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#EA4335",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  googleIconText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  accountCardMeta: {
+    flex: 1,
+  },
+  accountCardTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  accountCardSubtitle: {
+    fontSize: 11,
+    color: "#64748B",
+  },
+  accountPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    gap: 4,
+  },
+  accountPillConnected: {
+    backgroundColor: "#DCFCE7",
+  },
+  accountPillDisconnected: {
+    backgroundColor: "#F1F5F9",
+  },
+  accountDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  accountDotConnected: {
+    backgroundColor: "#16A34A",
+  },
+  accountDotDisconnected: {
+    backgroundColor: "#94A3B8",
+  },
+  accountPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  accountPillTextConnected: {
+    color: "#15803D",
+  },
+  accountPillTextDisconnected: {
+    color: "#475569",
   },
   spacer: {
     flexGrow: 1,

@@ -106,6 +106,10 @@ function RootNavigator() {
           name="reminder/[id]"
           options={{ title: "Reminder", presentation: "card", headerShown: false }}
         />
+        <Stack.Screen
+          name="settings/connections"
+          options={{ title: "Connected Accounts", presentation: "card", headerShown: false }}
+        />
       </Stack>
     </ThemeProvider>
   );
