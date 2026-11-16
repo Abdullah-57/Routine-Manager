@@ -36,11 +36,13 @@ type HomeSidebarProps = {
   wakePhrase: string;
   wakeSensitivity: WakeSensitivity;
   isAssistantListening?: boolean;
+  spokenFeedbackEnabled?: boolean;
   onToggleMicrophone: (value: boolean) => void;
   onTogglePush: (value: boolean) => void;
   onToggle24Hour: (value: boolean) => void;
   onToggleAssistant: (value: boolean) => void;
   onChangeWakeSensitivity: (value: WakeSensitivity) => void;
+  onToggleSpokenFeedback?: (value: boolean) => void;
   ping: ToolState;
   testPush: ToolState;
   onPing: () => void;
@@ -78,11 +80,13 @@ export function HomeSidebar({
   wakePhrase,
   wakeSensitivity,
   isAssistantListening = false,
+  spokenFeedbackEnabled = true,
   onToggleMicrophone,
   onTogglePush,
   onToggle24Hour,
   onToggleAssistant,
   onChangeWakeSensitivity,
+  onToggleSpokenFeedback,
   ping,
   testPush,
   onPing,
@@ -222,6 +226,14 @@ export function HomeSidebar({
                         ),
                       )}
                     </View>
+                  </View>
+
+                  <View style={styles.spokenReplyRow}>
+                    <SettingRow
+                      label="Speak Confirmations"
+                      value={spokenFeedbackEnabled ?? true}
+                      onValueChange={onToggleSpokenFeedback ?? (() => {})}
+                    />
                   </View>
                 </View>
               ) : null}
@@ -428,6 +440,11 @@ const styles = StyleSheet.create({
   sensitivityButtonTextActive: {
     color: "#0F172A",
     fontWeight: "700",
+  },
+  spokenReplyRow: {
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
   },
   divider: {
     height: 2,

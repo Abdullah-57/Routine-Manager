@@ -101,3 +101,30 @@ authRouter.get("/me", requireAuth, async (req, res) => {
 
   return res.status(200).json({ user: publicUser(user) });
 });
+
+authRouter.patch("/me", requireAuth, async (req, res) => {
+  const patchSchema = z.object({
+    timezone: z.string().trim().optional(),
+    displayName: z.string().trim().optional(),
+  });
+
+  const parsed = patchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid payload", details: parsed.error.flatten() });
+  }
+
+  const user = await User.findById(req.user!.id);
+  if (!user) {
+    return res.status(401).json({ error: "User not found" });
+  }
+
+  if (parsed.data.timezone) {
+    user.timezone = parsed.data.timezone;
+  }
+  if (parsed.data.displayName !== undefined) {
+    user.displayName = parsed.data.displayName;
+  }
+
+  await user.save();
+  return res.status(200).json({ user: publicUser(user) });
+});

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { AiSession } from "../models/AiSession";
-import { listRemindersForUser } from "./reminders";
+import { listRemindersForUser, startDateAndTimeInTimezone } from "./reminders";
 import {
   executeToolCall,
   routineTools,
@@ -80,6 +80,10 @@ function formatLocalDateTimeParts(date: Date, timezone: string) {
 
 function buildSystemPrompt(timezone: string, now: Date) {
   const today = formatDateKeyInTimezone(now, timezone);
+  const tomorrow = formatDateKeyInTimezone(
+    new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    timezone,
+  );
   const offset = getTimezoneOffsetISO(timezone, now);
   const nextWeekMonday = nextWeekMondayKey(timezone, now);
   const localParts = formatLocalDateTimeParts(now, timezone);
@@ -91,6 +95,12 @@ function buildSystemPrompt(timezone: string, now: Date) {
     timeStyle: "medium",
   }).format(now);
 
+  const localNowPrettyTime12h = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(now);
+
   return [
     "You are a routine planning assistant that both creates and manages reminders.",
     "Convert the user's natural-language daily plan into concrete reminders.",
@@ -98,97 +108,128 @@ function buildSystemPrompt(timezone: string, now: Date) {
     "Interpret relative times using the user's timezone and the exact Current local datetime below.",
     "Prefer fewer, clear reminders over noisy duplicates.",
     "Batch multiple new reminders into one create_reminders call when possible.",
-    "Manage / update / delete rules (follow strictly):",
+    "",
+    "MANDATORY DATE/TIME INFERENCE RULES (FOLLOW STRICTLY):",
+    `1) Date given, no time: create a single timed reminder at 09:00 local that day (${today}T09:00:00${offset}). Do NOT invent a workday range.`,
+    `2) Time given, no date (CRITICAL RULE):`,
+    `   - Current local time is ${localParts.time} (${localNowPrettyTime12h}). Today is ${today}. Tomorrow is ${tomorrow}.`,
+    `   - If the requested clock time is AHEAD of ${localParts.time} (${localNowPrettyTime12h}) today: schedule for TODAY (${today}). Example: user says '8 PM' when current time is ${localParts.time} -> ${today}T20:00:00${offset}.`,
+    `   - If the requested clock time has ALREADY PASSED ${localParts.time} (${localNowPrettyTime12h}) today: schedule for TOMORROW (${tomorrow})! Example: user says '7 AM' when current time is ${localParts.time} -> ${tomorrow}T07:00:00${offset}.`,
+    `   - NEVER schedule a reminder in the past for today when only a time was given!`,
+    `3) Exact relative durations are NOT vague — compute them precisely from Current local datetime (${localNowIso}):`,
+    `   - 'in N minutes' / 'N minutes from now' -> Current local datetime + N minutes (keep the resulting minute; do NOT round to :00 or the next hour).`,
+    `   - 'in N hours' -> Current local datetime + N hours.`,
+    `   - Example: if Current local datetime is 17:47 and user says '3 minutes from now', startAt must be 17:50 the same day — never 18:00.`,
+    `4) Vague instructions (e.g. 'sometime next week', 'maybe', 'whenever', 'soon', 'later'): do NOT ask for clarification. Make a best-judgment assignment using Current local datetime and phrasing:`,
+    `   - Defaults for vague timing: prefer 09:00 local unless context implies morning/afternoon/evening/night.`,
+    `   - 'next week' / 'sometime next week' -> Monday ${nextWeekMonday} at 09:00 local (start of next calendar week).`,
+    `   - 'this week' with no day -> the next upcoming weekday at 09:00 (skip past days; if none left, use next week's Monday).`,
+    `   - 'soon' / 'later today' (without a numeric duration) -> today at the next reasonable hour (at least ~1 hour ahead), else tomorrow 09:00.`,
+    `   - 'tomorrow morning/afternoon/evening' -> ${tomorrow} at 09:00 / 14:00 / 18:00 respectively.`,
+    `5) Always pick a concrete startAtISO. In the assistant message, state the EXACT start time you put in the tool call (HH:mm), not a rounded guess.`,
+    `6) Only ask a clarification question if the request has no actionable task at all (not merely vague timing).`,
+    "",
+    "MANAGE / UPDATE / DELETE RULES (FOLLOW STRICTLY):",
     "A) If the user wants to move, rename, reschedule, cancel, complete, or delete an existing reminder, identify it first.",
-    "B) Prefer ids from the Existing upcoming reminders list below. If that list is empty or no clear match, call list_reminders with a wide range (yesterday → end of next week) before update_reminder or delete_reminder.",
+    "B) Prefer ids from the Existing upcoming reminders list below. If that list is empty or no clear match, call list_reminders with a wide range (yesterday -> end of next week) before update_reminder or delete_reminder.",
     "C) Match by title keywords case-insensitively (e.g. 'gym' matches 'Gym'). If several match, pick the soonest upcoming scheduled one unless the user was specific.",
-    "D) 'Move X to 8am' / 'change X to …' → update_reminder with the new startAtISO (keep title unless asked to rename).",
-    "E) 'Cancel X' → update_reminder status=cancelled (keep the row). 'Delete/remove X' → delete_reminder.",
+    "D) 'Move X to 8am' / 'change X to ...' -> update_reminder with the new startAtISO (keep title unless asked to rename).",
+    "E) 'Cancel X' -> update_reminder status=cancelled (keep the row). 'Delete/remove X' -> delete_reminder.",
     "F) Do not create a duplicate when the user clearly asked to change an existing item.",
-    "Date/time inference rules (follow strictly):",
-    "1) Date given, no time: create a single timed reminder at 09:00 local that day. Do NOT invent a full workday range (no 09:00–18:00) unless the user asked for a range or duration.",
-    "2) Time given, no date: if that local clock time is still ahead of Current local datetime, use today; if that local clock time has already passed today, use tomorrow. Never schedule a reminder in the past when only a time was given.",
-    "3) Exact relative durations are NOT vague — compute them precisely from Current local datetime:",
-    "   'in N minutes' / 'N minutes from now' / 'about N minutes from now' → Current local datetime + N minutes (keep the resulting minute; do NOT round to :00 or the next hour).",
-    "   'in N hours' → Current local datetime + N hours.",
-    "   Example: if Current local datetime is 17:47 and user says '3 minutes from now', startAt must be 17:50 the same day — never 18:00.",
-    "4) Vague instructions (e.g. 'sometime next week', 'maybe', 'whenever', 'soon', 'later'): do NOT ask for clarification. Make a best-judgment assignment using Current local datetime and the phrasing, then create the reminder.",
-    "   Defaults for vague timing: prefer 09:00 local unless context implies morning/afternoon/evening/night.",
-    `   'next week' / 'sometime next week' → Monday ${nextWeekMonday} at 09:00 local (start of next calendar week, not later this week).`,
-    "   'this week' with no day → the next upcoming weekday at 09:00 (skip past days; if none left, use next week's Monday).",
-    "   'soon' / 'later today' (without a numeric duration) → today at the next reasonable hour (at least ~1 hour ahead), else tomorrow 09:00.",
-    "   'tomorrow morning/afternoon/evening' → tomorrow at 09:00 / 14:00 / 18:00 respectively.",
-    "5) Always pick a concrete startAtISO. In the assistant message, state the EXACT start time you put in the tool call (HH:mm), not a rounded guess.",
-    "6) Only ask a clarification question if the request has no actionable task at all (not merely vague timing).",
+    "",
     `User timezone: ${timezone}`,
     `Current UTC offset for that timezone: ${offset}`,
     `Today's date in user timezone (YYYY-MM-DD): ${today}`,
-    `Current local datetime: ${localNowPretty}`,
+    `Tomorrow's date in user timezone (YYYY-MM-DD): ${tomorrow}`,
+    `Current local datetime: ${localNowPretty} (${localNowPrettyTime12h})`,
     `Current local datetime (ISO for math): ${localNowIso}`,
     `Next week starts (Monday): ${nextWeekMonday}`,
-    `When creating or rescheduling reminders, always pass startAtISO/endAtISO using offset ${offset} (example: ${today}T09:00:00${offset}).`,
-  ].join(" ");
+    `When creating or rescheduling reminders, always pass startAtISO/endAtISO using offset ${offset}.`,
+  ].join("\n");
 }
 
-function formatReminderClock(isoOrDate: string | Date, timezone: string): string {
+function formatReminderClock(
+  isoOrDate: string | Date,
+  timezone: string,
+  now: Date,
+): string {
   try {
     const date = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
-    return new Intl.DateTimeFormat("en-GB", {
+    const { date: itemDate } = startDateAndTimeInTimezone(date, timezone);
+    const { date: todayDate } = startDateAndTimeInTimezone(now, timezone);
+    const tomorrowDate = formatDateKeyInTimezone(
+      new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      timezone,
+    );
+
+    const timeStr = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+
+    if (itemDate === todayDate) {
+      return `today at ${timeStr}`;
+    }
+    if (itemDate === tomorrowDate) {
+      return `tomorrow at ${timeStr}`;
+    }
+    const dayStr = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
       weekday: "short",
       month: "short",
       day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
     }).format(date);
+    return `${dayStr} at ${timeStr}`;
   } catch {
     return String(isoOrDate);
   }
 }
 
-/** Prefer factual times from tool results so the UI message never invents wrong clocks. */
+/** Prefer factual times from tool results so the UI message and TTS voice never invent wrong clocks. */
 function buildFactualAssistantMessage(
   modelMessage: string,
   affect: ToolAffectSummary,
   timezone: string,
+  now: Date,
 ): string {
   const parts: string[] = [];
 
   if (affect.created.length > 0) {
-    const lines = affect.created.map((item) => {
-      const when = formatReminderClock(item.startAt, item.timezone || timezone);
-      return `- ${item.title} at ${when}`;
-    });
-    parts.push(`Created ${affect.created.length} reminder(s):\n${lines.join("\n")}`);
+    if (affect.created.length === 1) {
+      const item = affect.created[0];
+      const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
+      parts.push(`I've scheduled ${item.title} for ${when}.`);
+    } else {
+      const itemsList = affect.created
+        .map(
+          (item) =>
+            `${item.title} (${formatReminderClock(item.startAt, item.timezone || timezone, now)})`,
+        )
+        .join(", ");
+      parts.push(`I've scheduled ${affect.created.length} reminders: ${itemsList}.`);
+    }
   }
 
   if (affect.updated.length > 0) {
-    const lines = affect.updated.map((item) => {
-      const when = formatReminderClock(item.startAt, item.timezone || timezone);
-      return `- ${item.title} → ${when} (${item.status})`;
-    });
-    parts.push(`Updated ${affect.updated.length} reminder(s):\n${lines.join("\n")}`);
+    const itemsList = affect.updated
+      .map(
+        (item) =>
+          `${item.title} (${item.status}) for ${formatReminderClock(item.startAt, item.timezone || timezone, now)}`,
+      )
+      .join(", ");
+    parts.push(`Updated: ${itemsList}.`);
   }
 
   if (affect.deleted.length > 0) {
-    parts.push(
-      `Deleted ${affect.deleted.length} reminder(s): ${affect.deleted
-        .map((item) => item.id)
-        .join(", ")}`,
-    );
+    parts.push(`Removed ${affect.deleted.length} reminder(s).`);
   }
 
   if (parts.length === 0) {
     return modelMessage;
   }
 
-  // Keep a short model note when it adds useful context beyond the factual summary.
-  const trimmed = modelMessage.trim();
-  if (trimmed && !trimmed.toLowerCase().startsWith("scheduled")) {
-    return `${parts.join("\n\n")}\n\n${trimmed}`;
-  }
-  return parts.join("\n\n");
+  return parts.join(" ");
 }
 
 async function buildExistingRemindersContext(
@@ -211,7 +252,7 @@ async function buildExistingRemindersContext(
       return "Existing upcoming reminders: (none in the next ~14 days).";
     }
     const lines = upcoming.map((item) => {
-      const when = formatReminderClock(item.startAt, item.timezone || timezone);
+      const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
       return `- id=${item.id} | ${item.title} | ${when} | status=${item.status}`;
     });
     return `Existing upcoming reminders (use these ids for update/delete):\n${lines.join("\n")}`;
@@ -325,6 +366,7 @@ export async function parseRoutineWithTools(input: {
     assistantMessage,
     affect,
     input.timezone,
+    now,
   );
 
   const session = await AiSession.create({

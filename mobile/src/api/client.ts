@@ -62,6 +62,15 @@ export async function apiFetch<T>(
     ...headers,
   };
 
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && tz !== "UTC") {
+      requestHeaders["X-Timezone"] = tz;
+    }
+  } catch {
+    // Ignore if not supported
+  }
+
   if (body !== undefined) {
     requestHeaders["Content-Type"] = "application/json";
   }

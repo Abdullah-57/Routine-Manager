@@ -71,7 +71,7 @@ export async function listRemindersForUser(
 }
 
 /** Calendar date (YYYY-MM-DD) + clock time (HH:mm) in the given timezone. */
-function startDateAndTimeInTimezone(
+export function startDateAndTimeInTimezone(
   startAt: Date,
   timezone: string,
 ): { date: string; time: string } {
@@ -120,9 +120,24 @@ export async function createRemindersForUser(
   created: ReminderDto[];
   skippedDuplicates: Array<{ title: string; startAtISO: string }>;
 }> {
+  const now = new Date();
   const prepared = items.map((item) => {
-    const startAt = parseDate(item.startAtISO);
-    const endAt = item.endAtISO ? parseDate(item.endAtISO) : undefined;
+    let startAt = parseDate(item.startAtISO);
+    let endAt = item.endAtISO ? parseDate(item.endAtISO) : undefined;
+
+    // Rule 2 Universal Enforcement:
+    // If a time was given on today's date that has already passed in the user's timezone,
+    // roll it forward to tomorrow at that exact time so it is never scheduled in the past.
+    const { date: itemDate } = startDateAndTimeInTimezone(startAt, timezone);
+    const { date: todayDate } = startDateAndTimeInTimezone(now, timezone);
+
+    if (itemDate === todayDate && startAt.getTime() < now.getTime()) {
+      startAt = new Date(startAt.getTime() + 24 * 60 * 60 * 1000);
+      if (endAt) {
+        endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
+      }
+    }
+
     if (endAt && endAt < startAt) {
       throw new Error(`endAt must be after startAt for "${item.title}"`);
     }
@@ -136,7 +151,7 @@ export async function createRemindersForUser(
       timezone,
       status: "scheduled" as const,
       source: "ai" as const,
-      startAtISO: item.startAtISO,
+      startAtISO: startAt.toISOString(),
     };
   });
 
@@ -212,6 +227,7 @@ export async function updateReminderForUser(
     endAtISO?: string | null;
     status?: "scheduled" | "completed" | "cancelled";
   },
+  timezone?: string,
 ): Promise<ReminderDto> {
   if (!Types.ObjectId.isValid(input.reminderId)) {
     throw new Error("Reminder not found");
@@ -228,10 +244,34 @@ export async function updateReminderForUser(
 
   if (input.title !== undefined) reminder.title = input.title.trim();
   if (input.notes !== undefined) reminder.notes = input.notes.trim();
-  if (input.startAtISO !== undefined) reminder.startAt = parseDate(input.startAtISO);
-  if (input.endAtISO !== undefined) {
+
+  if (input.startAtISO !== undefined) {
+    let startAt = parseDate(input.startAtISO);
+    let endAt = input.endAtISO ? parseDate(input.endAtISO) : reminder.endAt;
+
+    // Rule 2 Universal Enforcement:
+    // If rescheduling to a clock time on today's date that has already passed,
+    // roll it forward to tomorrow at that exact time so it is never scheduled in the past.
+    const tz = timezone || reminder.timezone || "UTC";
+    const now = new Date();
+    const { date: itemDate } = startDateAndTimeInTimezone(startAt, tz);
+    const { date: todayDate } = startDateAndTimeInTimezone(now, tz);
+
+    if (itemDate === todayDate && startAt.getTime() < now.getTime()) {
+      startAt = new Date(startAt.getTime() + 24 * 60 * 60 * 1000);
+      if (endAt) {
+        endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
+      }
+    }
+
+    reminder.startAt = startAt;
+    if (input.endAtISO !== undefined) {
+      reminder.endAt = endAt;
+    }
+  } else if (input.endAtISO !== undefined) {
     reminder.endAt = input.endAtISO ? parseDate(input.endAtISO) : undefined;
   }
+
   if (input.status !== undefined) reminder.status = input.status;
 
   if (reminder.endAt && reminder.endAt < reminder.startAt) {

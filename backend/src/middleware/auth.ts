@@ -22,13 +22,18 @@ export function signAuthToken(userId: string, email: string): string {
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  let token = "";
   const header = req.headers.authorization;
 
-  if (!header?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing or invalid Authorization header" });
+  if (header?.startsWith("Bearer ")) {
+    token = header.slice("Bearer ".length).trim();
+  } else if (typeof req.query.token === "string" && req.query.token.trim()) {
+    token = req.query.token.trim();
   }
 
-  const token = header.slice("Bearer ".length).trim();
+  if (!token) {
+    return res.status(401).json({ error: "Missing or invalid Authorization header" });
+  }
 
   try {
     const payload = jwt.verify(token, getJwtSecret()) as JwtPayload;

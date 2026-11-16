@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { Reminder } from "../models/Reminder";
+import { startDateAndTimeInTimezone } from "../services/reminders";
 
 const statusEnum = z.enum(["scheduled", "completed", "cancelled"]);
 const sourceEnum = z.enum(["ai", "manual"]);
@@ -123,8 +124,22 @@ remindersRouter.post("/", async (req, res) => {
   }
 
   const data = parsed.data;
-  const startAt = new Date(data.startAt);
-  const endAt = data.endAt ? new Date(data.endAt) : undefined;
+  let startAt = new Date(data.startAt);
+  let endAt = data.endAt ? new Date(data.endAt) : undefined;
+
+  const tz = data.timezone ?? "UTC";
+  const now = new Date();
+  const { date: itemDate } = startDateAndTimeInTimezone(startAt, tz);
+  const { date: todayDate } = startDateAndTimeInTimezone(now, tz);
+
+  // Rule 2 Universal Enforcement:
+  // If time was given on today's date that has already passed, schedule for tomorrow.
+  if (itemDate === todayDate && startAt.getTime() < now.getTime()) {
+    startAt = new Date(startAt.getTime() + 24 * 60 * 60 * 1000);
+    if (endAt) {
+      endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
+    }
+  }
 
   if (endAt && endAt < startAt) {
     return res.status(400).json({ error: "endAt must be after startAt" });
@@ -136,7 +151,7 @@ remindersRouter.post("/", async (req, res) => {
     notes: data.notes ?? "",
     startAt,
     endAt,
-    timezone: data.timezone ?? "UTC",
+    timezone: tz,
     status: data.status ?? "scheduled",
     source: data.source ?? "manual",
     localNotificationId: data.localNotificationId,
@@ -168,11 +183,32 @@ remindersRouter.patch("/:id", async (req, res) => {
 
   if (data.title !== undefined) reminder.title = data.title;
   if (data.notes !== undefined) reminder.notes = data.notes;
-  if (data.startAt !== undefined) reminder.startAt = new Date(data.startAt);
-  if (data.endAt !== undefined) reminder.endAt = data.endAt ? new Date(data.endAt) : undefined;
   if (data.timezone !== undefined) reminder.timezone = data.timezone;
   if (data.status !== undefined) reminder.status = data.status;
   if (data.source !== undefined) reminder.source = data.source;
+
+  if (data.startAt !== undefined) {
+    let startAt = new Date(data.startAt);
+    let endAt = data.endAt ? new Date(data.endAt) : reminder.endAt;
+    const tz = data.timezone ?? reminder.timezone ?? "UTC";
+    const now = new Date();
+    const { date: itemDate } = startDateAndTimeInTimezone(startAt, tz);
+    const { date: todayDate } = startDateAndTimeInTimezone(now, tz);
+
+    if (itemDate === todayDate && startAt.getTime() < now.getTime()) {
+      startAt = new Date(startAt.getTime() + 24 * 60 * 60 * 1000);
+      if (endAt) {
+        endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
+      }
+    }
+
+    reminder.startAt = startAt;
+    if (data.endAt !== undefined) {
+      reminder.endAt = endAt;
+    }
+  } else if (data.endAt !== undefined) {
+    reminder.endAt = data.endAt ? new Date(data.endAt) : undefined;
+  }
   if (data.localNotificationId !== undefined) {
     reminder.localNotificationId = data.localNotificationId ?? undefined;
   }

@@ -72,6 +72,7 @@ function escapeRegExp(string: string): string {
 export function normalizeSpeechText(text: string): string {
   return text
     .toLowerCase()
+    .replace(/['’]/g, "")
     .replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -142,6 +143,104 @@ export function matchWakePhrase(
 }
 
 /**
+ * Detects whether an utterance is a conversation-closing phrase.
+ */
+export function isClosingPhrase(text: string): boolean {
+  const normalized = normalizeSpeechText(text);
+  if (!normalized) return false;
+  const closings = [
+    "done",
+    "that's all",
+    "thats all",
+    "that is all",
+    "thank you",
+    "thanks",
+    "all good",
+    "goodbye",
+    "bye",
+    "cancel",
+    "stop",
+    "close",
+    "nothing else",
+    "no that's all",
+    "no thats all",
+    "no that is all",
+    "no thanks",
+    "no thank you",
+    "im done",
+    "i'm done",
+    "i am done",
+    "we are done",
+    "finished",
+    "all set",
+    "exit",
+  ];
+  return (
+    closings.includes(normalized) ||
+    closings.some(
+      (c) =>
+        normalized === c ||
+        normalized.startsWith(c + " ") ||
+        normalized.endsWith(" " + c),
+    )
+  );
+}
+
+/**
+ * Checks whether an utterance consists strictly of the wake-phrase.
+ */
+export function isOnlyWakePhrase(
+  rawTranscript: string,
+  wakePhrase: string = "hey assistant",
+): boolean {
+  const normalized = normalizeSpeechText(rawTranscript);
+  if (!normalized) return false;
+  const target = normalizeSpeechText(wakePhrase) || "hey assistant";
+  const variants = [
+    target,
+    "hey assistant",
+    "assistant",
+    "ok assistant",
+    "okay assistant",
+    "hi assistant",
+    "hey",
+    "hello assistant",
+  ];
+  return variants.includes(normalized);
+}
+
+/**
+ * Strips leading wake words (e.g. "hey assistant gym at 7am" -> "gym at 7am").
+ */
+export function stripLeadingWakePhrase(
+  rawTranscript: string,
+  wakePhrase: string = "hey assistant",
+): string {
+  const normalized = normalizeSpeechText(rawTranscript);
+  if (!normalized) return "";
+  const target = normalizeSpeechText(wakePhrase) || "hey assistant";
+  const variants = [
+    target,
+    "hey assistant",
+    "ok assistant",
+    "okay assistant",
+    "hi assistant",
+    "hello assistant",
+    "assistant",
+  ];
+
+  for (const variant of variants) {
+    if (normalized === variant) {
+      return "";
+    }
+    if (normalized.startsWith(variant + " ")) {
+      return normalized.slice(variant.length).trim();
+    }
+  }
+  return normalized;
+}
+
+/**
  * Checks whether microphone and speech recognition permissions are granted.
  */
 export async function checkWakeWordPermissions(): Promise<boolean> {
@@ -178,8 +277,16 @@ export type UseWakeWordOptions = {
   sensitivity?: WakeSensitivity;
   /** Whether the user is currently speaking/editing in another sheet (pauses background wake loop) */
   paused?: boolean;
-  /** Callback fired when wake phrase is detected */
-  onWake: (result: { phrase: string; trailingTranscript: string }) => void;
+  /** Mode: "wake" scans for wake-phrase; "conversation" streams continuous speech for multi-turn session */
+  mode?: "wake" | "conversation";
+  /** Callback fired when wake phrase is detected (in "wake" mode) */
+  onWake?: (result: { phrase: string; trailingTranscript: string }) => void;
+  /** Callback fired when wake phrase is detected during active conversation / follow-up mode */
+  onFollowUpWake?: (phrase: string) => void;
+  /** Callback fired as live speech words stream in */
+  onTranscript?: (transcript: string) => void;
+  /** Callback fired when speech pauses and utterance is ready to process (in "conversation" mode) */
+  onUtteranceComplete?: (transcript: string) => void;
   /** Optional callback for logging or UI errors */
   onError?: (error: Error) => void;
 };
@@ -191,6 +298,7 @@ export type WakeWordState = {
   hasPermission: boolean | null;
   lastTranscript: string;
   wakeCount: number;
+  clearTranscript: () => void;
   requestPermission: () => Promise<boolean>;
   restart: () => void;
 };
@@ -203,7 +311,11 @@ export function useWakeWord({
   wakePhrase = "hey assistant",
   sensitivity = "medium",
   paused = false,
+  mode = "wake",
   onWake,
+  onFollowUpWake,
+  onTranscript,
+  onUtteranceComplete,
   onError,
 }: UseWakeWordOptions): WakeWordState {
   const isNativeAvailable = Boolean(NativeSpeechRecognition);
@@ -214,15 +326,29 @@ export function useWakeWord({
   const [lastTranscript, setLastTranscript] = useState("");
   const [wakeCount, setWakeCount] = useState(0);
 
+  const lastTranscriptRef = useRef<string>("");
   // Prevent multiple wake triggers within cooldown window (e.g., 2.5 seconds)
   const lastWakeTimeRef = useRef<number>(0);
   const isStartingRef = useRef<boolean>(false);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enabledRef = useRef<boolean>(enabled && !paused);
   enabledRef.current = enabled && !paused;
 
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
   const onWakeRef = useRef(onWake);
   onWakeRef.current = onWake;
+
+  const onFollowUpWakeRef = useRef(onFollowUpWake);
+  onFollowUpWakeRef.current = onFollowUpWake;
+
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
+
+  const onUtteranceCompleteRef = useRef(onUtteranceComplete);
+  onUtteranceCompleteRef.current = onUtteranceComplete;
 
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -237,6 +363,15 @@ export function useWakeWord({
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
+    }
+  }, []);
+
+  const clearTranscript = useCallback(() => {
+    setLastTranscript("");
+    lastTranscriptRef.current = "";
+    if (silenceDebounceRef.current) {
+      clearTimeout(silenceDebounceRef.current);
+      silenceDebounceRef.current = null;
     }
   }, []);
 
@@ -326,6 +461,26 @@ export function useWakeWord({
   useSafeSpeechRecognitionEvent("end", () => {
     isStartingRef.current = false;
 
+    // In conversation mode, if the user finished speaking and recognizer ended,
+    // only commit if the text contains actual instructions beyond the wake word.
+    if (modeRef.current === "conversation" && silenceDebounceRef.current) {
+      clearTimeout(silenceDebounceRef.current);
+      silenceDebounceRef.current = null;
+      const finalRaw = lastTranscriptRef.current.trim();
+      if (
+        finalRaw.length > 0 &&
+        !isOnlyWakePhrase(finalRaw, wakePhraseRef.current)
+      ) {
+        const cleanUtterance = stripLeadingWakePhrase(
+          finalRaw,
+          wakePhraseRef.current,
+        );
+        if (cleanUtterance.length > 0) {
+          onUtteranceCompleteRef.current?.(cleanUtterance);
+        }
+      }
+    }
+
     if (enabledRef.current) {
       clearRestartTimer();
       // Seamless restart so microphone starts listening again immediately
@@ -351,8 +506,84 @@ export function useWakeWord({
       const firstText = candidates[0]?.transcript || "";
       if (firstText) {
         setLastTranscript(firstText);
+        lastTranscriptRef.current = firstText;
       }
 
+      // If we are in active conversation mode, stream transcript directly to UI
+      // and debounce silence to commit utterance hands-free.
+      if (modeRef.current === "conversation") {
+        if (firstText) {
+          const trimmed = firstText.trim();
+
+          // Check if any candidate matches the wake phrase (e.g. "hey assistant", "assistant", etc.)
+          let wakeMatch: ReturnType<typeof matchWakePhrase> | null = null;
+          for (const res of candidates) {
+            const text = res?.transcript;
+            if (!text) continue;
+            const test = matchWakePhrase(
+              text,
+              wakePhraseRef.current,
+              sensitivityRef.current,
+            );
+            if (test.matched) {
+              wakeMatch = test;
+              break;
+            }
+          }
+
+          // Case A: User spoke ONLY the wake phrase (e.g. "Hey Assistant" during follow-up):
+          // Acknowledge the wake-word, give haptics, notify UI immediately, and keep listening for instruction!
+          const isWakeOnly =
+            isOnlyWakePhrase(trimmed, wakePhraseRef.current) ||
+            (wakeMatch && !wakeMatch.trailingTranscript);
+
+          if (isWakeOnly) {
+            if (silenceDebounceRef.current) {
+              clearTimeout(silenceDebounceRef.current);
+              silenceDebounceRef.current = null;
+            }
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+              () => {},
+            );
+            onTranscriptRef.current?.("");
+            onFollowUpWakeRef.current?.(wakeMatch?.phraseMatched || trimmed);
+            return;
+          }
+
+          // Case B: User spoke the wake phrase AND instruction together: "Hey Assistant gym at 7am"
+          if (wakeMatch && wakeMatch.trailingTranscript) {
+            onFollowUpWakeRef.current?.(wakeMatch.phraseMatched);
+          }
+
+          // Strip any leading wake phrase (e.g. "hey assistant gym at 7am" -> "gym at 7am")
+          const cleanUtterance = stripLeadingWakePhrase(
+            trimmed,
+            wakePhraseRef.current,
+          );
+          if (!cleanUtterance) {
+            return;
+          }
+
+          onTranscriptRef.current?.(cleanUtterance);
+
+          if (silenceDebounceRef.current) {
+            clearTimeout(silenceDebounceRef.current);
+            silenceDebounceRef.current = null;
+          }
+
+          // Allow a comfortable pause (2000ms regular, 1600ms on final) so the user
+          // has ample time to speak their full sentence without being rushed.
+          const isFinal = Boolean((event as any)?.isFinal);
+          const debounceMs = isFinal ? 1600 : 2000;
+          silenceDebounceRef.current = setTimeout(() => {
+            silenceDebounceRef.current = null;
+            onUtteranceCompleteRef.current?.(cleanUtterance);
+          }, debounceMs);
+        }
+        return;
+      }
+
+      // If in wake-word detection mode:
       // Check all alternative candidates from the recognizer
       let bestMatch: ReturnType<typeof matchWakePhrase> | null = null;
       for (const res of candidates) {
@@ -381,7 +612,7 @@ export function useWakeWord({
             () => {},
           );
 
-          onWakeRef.current({
+          onWakeRef.current?.({
             phrase: bestMatch.phraseMatched,
             trailingTranscript: bestMatch.trailingTranscript,
           });
@@ -473,6 +704,7 @@ export function useWakeWord({
     hasPermission,
     lastTranscript,
     wakeCount,
+    clearTranscript,
     requestPermission: handleRequestPermission,
     restart,
   };

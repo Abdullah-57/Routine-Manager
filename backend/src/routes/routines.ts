@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
+import OpenAI from "openai";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { parseRoutineWithTools } from "../services/openaiRoutine";
@@ -47,7 +48,29 @@ export const routinesRouter = Router();
 
 routinesRouter.use(requireAuth);
 
-function resolveTimezone(body: unknown): string {
+function resolveTimezone(body: unknown, req?: Request): string {
+  if (
+    body &&
+    typeof body === "object" &&
+    "timezone" in body &&
+    typeof (body as { timezone: unknown }).timezone === "string" &&
+    (body as { timezone: string }).timezone.trim()
+  ) {
+    const tz = (body as { timezone: string }).timezone.trim();
+    if (tz && tz.toUpperCase() !== "UTC") {
+      return tz;
+    }
+  }
+
+  const headerTz = req?.headers["x-timezone"];
+  if (
+    typeof headerTz === "string" &&
+    headerTz.trim() &&
+    headerTz.trim().toUpperCase() !== "UTC"
+  ) {
+    return headerTz.trim();
+  }
+
   if (
     body &&
     typeof body === "object" &&
@@ -57,6 +80,7 @@ function resolveTimezone(body: unknown): string {
   ) {
     return (body as { timezone: string }).timezone.trim();
   }
+
   return "UTC";
 }
 
@@ -86,7 +110,7 @@ routinesRouter.post("/parse", maybeAudioUpload, async (req, res) => {
   }
 
   try {
-    const timezone = resolveTimezone(req.body);
+    const timezone = resolveTimezone(req.body, req);
     const file = req.file;
     let text = "";
     let inputType: "text" | "audio" = "text";
@@ -166,3 +190,55 @@ routinesRouter.post("/transcribe", upload.single("audio"), async (req, res) => {
     return res.status(502).json({ error: message });
   }
 });
+
+/**
+ * Synthesizes speech using OpenAI TTS.
+ * Used as a zero-setup audio fallback for post-wake conversation audio
+ * when native expo-speech is not yet compiled into the current development build APK.
+ */
+routinesRouter.get("/tts", async (req, res) => {
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(500).json({
+      error: "OPENAI_API_KEY is not configured on the server",
+    });
+  }
+
+  const rawText =
+    typeof req.query.text === "string" ? req.query.text.trim() : "";
+  if (!rawText) {
+    return res.status(400).json({
+      error: "Query parameter 'text' is required",
+    });
+  }
+
+  // Clean markdown and bullet symbols for natural spoken output
+  const cleanText = rawText
+    .replace(/^[-*•]\s+/gm, "")
+    .replace(/[#*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 1000);
+
+  try {
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await client.audio.speech.create({
+      model: "tts-1",
+      voice: "alloy",
+      input: cleanText,
+      response_format: "mp3",
+    });
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.set({
+      "Content-Type": "audio/mpeg",
+      "Content-Length": buffer.length.toString(),
+      "Cache-Control": "public, max-age=86400",
+    });
+    return res.send(buffer);
+  } catch (error) {
+    console.error("routines/tts failed:", error);
+    return res.status(502).json({ error: "Failed to synthesize speech" });
+  }
+});
+

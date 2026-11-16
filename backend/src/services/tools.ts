@@ -24,7 +24,8 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "create_reminders",
-      description: "Create one or more reminders for the user",
+      description:
+        "Create one or more reminders for the user. Strictly follow universal date/time inference rules: (1) date given, no time -> 09:00 local; (2) time given, no date -> today if clock time is ahead, tomorrow if passed; (3) relative durations ('in N minutes/hours') -> compute precisely from current local datetime without rounding; (4) vague instructions ('next week') -> next Monday 09:00 local.",
       parameters: {
         type: "object",
         properties: {
@@ -55,7 +56,8 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "update_reminder",
-      description: "Update an existing reminder by id",
+      description:
+        "Update an existing reminder by id. Strictly follow universal manage rules: identify existing reminder by title keywords case-insensitively; 'move/change' -> update startAtISO; 'cancel' -> update status=cancelled; never create a duplicate when modifying an existing item.",
       parameters: {
         type: "object",
         properties: {
@@ -150,7 +152,7 @@ async function executeUpdateReminder(args: unknown, ctx: ToolContext) {
     status?: "scheduled" | "completed" | "cancelled";
   };
 
-  const updated = await updateReminderForUser(ctx.userId, payload);
+  const updated = await updateReminderForUser(ctx.userId, payload, ctx.timezone);
   ctx.affect.updated.push(updated);
   return { updated };
 }

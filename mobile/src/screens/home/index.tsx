@@ -1,6 +1,6 @@
 import { AudioModule } from "expo-audio";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ApiError, pingHealth } from "@/api/client";
+import { ApiError, apiFetch, pingHealth } from "@/api/client";
 import { sendTestPush } from "@/api/notifications";
 import {
   listReminders,
@@ -37,7 +37,22 @@ import {
   syncLocalNotificationsForReminders,
 } from "@/notifications/local-reminders";
 import { useAppPreferences } from "@/preferences/app-preferences";
-import { useWakeWord } from "@/assistant/wake-word-service";
+import * as Haptics from "expo-haptics";
+import {
+  AssistantOverlay,
+  type AssistantPhase,
+} from "@/components/assistant-overlay";
+import {
+  estimateSpeechDurationMs,
+  speakText,
+  stopSpeaking,
+} from "@/assistant/speech-service";
+import {
+  isClosingPhrase,
+  isOnlyWakePhrase,
+  stripLeadingWakePhrase,
+  useWakeWord,
+} from "@/assistant/wake-word-service";
 import { radius, shadows, spacing } from "@/theme";
 
 type PingState =
@@ -171,10 +186,77 @@ export function HomeScreen() {
   const [wakeFeedback, setWakeFeedback] = useState<string | null>(null);
   const isSubmittingRef = useRef(false);
 
-  const timezone = useMemo(
-    () => user?.timezone || getDeviceTimezone(),
-    [user?.timezone],
+  // Feature 1.2: Post-Wake Conversation Session & Spoken Confirmation State
+  const [assistantOverlayOpen, setAssistantOverlayOpen] = useState(false);
+  const [assistantPhase, setAssistantPhase] =
+    useState<AssistantPhase>("listening");
+  const [assistantLiveTranscript, setAssistantLiveTranscript] = useState("");
+  const [assistantSpokenMessage, setAssistantSpokenMessage] = useState("");
+  const [assistantCreatedReminders, setAssistantCreatedReminders] = useState<
+    ReminderSummary[]
+  >([]);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [isTtsSpeaking, setIsTtsSpeaking] = useState(false);
+
+  const assistantIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
   );
+  const assistantOverlayOpenRef = useRef(assistantOverlayOpen);
+  assistantOverlayOpenRef.current = assistantOverlayOpen;
+  const isTtsSpeakingRef = useRef(isTtsSpeaking);
+  isTtsSpeakingRef.current = isTtsSpeaking;
+
+  const [followUpWakeDetected, setFollowUpWakeDetected] = useState(false);
+
+  const clearAssistantIdleTimer = useCallback(() => {
+    if (assistantIdleTimerRef.current) {
+      clearTimeout(assistantIdleTimerRef.current);
+      assistantIdleTimerRef.current = null;
+    }
+  }, []);
+
+  const handleCloseAssistant = useCallback(() => {
+    clearAssistantIdleTimer();
+    void stopSpeaking();
+    setIsTtsSpeaking(false);
+    setFollowUpWakeDetected(false);
+    setAssistantOverlayOpen(false);
+    setAssistantPhase("listening");
+    setAssistantLiveTranscript("");
+    wakeWordRef.current?.clearTranscript();
+  }, [clearAssistantIdleTimer]);
+
+  const startAssistantIdleTimer = useCallback(() => {
+    clearAssistantIdleTimer();
+    // 15 seconds idle timeout hands-free auto-close
+    assistantIdleTimerRef.current = setTimeout(() => {
+      handleCloseAssistant();
+    }, 15000);
+  }, [clearAssistantIdleTimer, handleCloseAssistant]);
+
+  const timezone = useMemo(() => {
+    const devTz = getDeviceTimezone();
+    if (devTz && devTz !== "UTC") return devTz;
+    if (user?.timezone && user.timezone !== "UTC") return user.timezone;
+    return devTz || "UTC";
+  }, [user?.timezone]);
+
+  // Keep user profile timezone updated with actual device timezone
+  useEffect(() => {
+    if (
+      token &&
+      user &&
+      timezone &&
+      timezone !== "UTC" &&
+      user.timezone !== timezone
+    ) {
+      apiFetch("/auth/me", {
+        method: "PATCH",
+        token,
+        body: { timezone },
+      }).catch(() => {});
+    }
+  }, [token, user, timezone]);
 
   const sortedReminders = useMemo(
     () => sortNewestFirst(allReminders),
@@ -270,6 +352,73 @@ export function HomeScreen() {
     });
     setPlanText("");
     setShowAllReminders(false);
+
+    // Feature 1.2: If assistant session is active, read the confirmation aloud via native TTS
+    // and keep listening for follow-up edits or additions hands-free
+    if (assistantOverlayOpenRef.current) {
+      setAssistantCreatedReminders(created);
+      setAssistantSpokenMessage(baseMessage);
+      setAssistantPhase("responding");
+
+      if (prefs.spokenFeedbackEnabled) {
+        setIsTtsSpeaking(true);
+
+        // Safety watchdog: emergency safety backstop so UI never hangs indefinitely
+        const maxAudioWaitMs = Math.max(
+          6500,
+          estimateSpeechDurationMs(baseMessage) * 1.5 + 2500,
+        );
+        const watchdogTimer = setTimeout(() => {
+          if (isTtsSpeakingRef.current) {
+            setIsTtsSpeaking(false);
+            setFollowUpWakeDetected(true);
+            setAssistantPhase("listening");
+            setAssistantLiveTranscript("");
+            wakeWordRef.current?.clearTranscript();
+            startAssistantIdleTimer();
+          }
+        }, maxAudioWaitMs);
+
+        void speakText(baseMessage, {
+          token,
+          onStart: () => {
+            setIsTtsSpeaking(true);
+          },
+          onDone: () => {
+            clearTimeout(watchdogTimer);
+            setIsTtsSpeaking(false);
+            setFollowUpWakeDetected(true);
+            setAssistantPhase("listening");
+            setAssistantLiveTranscript("");
+            wakeWordRef.current?.clearTranscript();
+            startAssistantIdleTimer();
+          },
+          onStopped: () => {
+            clearTimeout(watchdogTimer);
+            setIsTtsSpeaking(false);
+            setFollowUpWakeDetected(true);
+            setAssistantPhase("listening");
+            setAssistantLiveTranscript("");
+            wakeWordRef.current?.clearTranscript();
+            startAssistantIdleTimer();
+          },
+          onError: () => {
+            clearTimeout(watchdogTimer);
+            setIsTtsSpeaking(false);
+            setFollowUpWakeDetected(true);
+            setAssistantPhase("listening");
+            startAssistantIdleTimer();
+          },
+        });
+      } else {
+        setIsTtsSpeaking(false);
+        setFollowUpWakeDetected(true);
+        setAssistantPhase("listening");
+        setAssistantLiveTranscript("");
+        wakeWordRef.current?.clearTranscript();
+        startAssistantIdleTimer();
+      }
+    }
   }
 
   const submitPlanText = useCallback(
@@ -306,16 +455,135 @@ export function HomeScreen() {
             ? error.message
             : "Could not plan your day. Check the network and try again.";
         setPlan({ status: "error", message });
+
+        if (assistantOverlayOpenRef.current) {
+          setAssistantPhase("error");
+          setAssistantError(message);
+          if (prefs.spokenFeedbackEnabled) {
+            setIsTtsSpeaking(true);
+            void speakText(
+              "I couldn't process that. Please try speaking again.",
+              {
+                token,
+                onStart: () => setIsTtsSpeaking(true),
+                onDone: () => {
+                  setIsTtsSpeaking(false);
+                  setAssistantPhase("listening");
+                  startAssistantIdleTimer();
+                },
+                onStopped: () => {
+                  setIsTtsSpeaking(false);
+                  setAssistantPhase("listening");
+                  startAssistantIdleTimer();
+                },
+                onError: () => {
+                  setIsTtsSpeaking(false);
+                  setAssistantPhase("listening");
+                  startAssistantIdleTimer();
+                },
+              },
+            );
+          } else {
+            startAssistantIdleTimer();
+          }
+        }
       } finally {
         isSubmittingRef.current = false;
       }
     },
-    [isVoiceBusy, token, timezone, refreshReminders],
+    [
+      isVoiceBusy,
+      token,
+      timezone,
+      refreshReminders,
+      prefs.spokenFeedbackEnabled,
+      startAssistantIdleTimer,
+    ],
   );
 
   async function handlePlanSubmit() {
     await submitPlanText(planText);
   }
+
+  // Feature 1.2: Handles user utterances during the post-wake conversation session
+  const handleAssistantUtterance = useCallback(
+    async (transcript: string) => {
+      const trimmed = transcript.trim();
+      if (!trimmed) return;
+
+      // 1. If user spoke ONLY the wake phrase (e.g. saying "Hey Assistant" while waiting):
+      // Acknowledge the wake-phrase, give haptic feedback, and keep listening for instruction!
+      if (isOnlyWakePhrase(trimmed, prefs.wakePhrase)) {
+        clearAssistantIdleTimer();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+          () => {},
+        );
+        setFollowUpWakeDetected(true);
+        setAssistantPhase("listening");
+        setAssistantLiveTranscript("");
+        wakeWordRef.current?.clearTranscript();
+        startAssistantIdleTimer();
+        return;
+      }
+
+      // 2. Strip leading wake phrase from the instruction (e.g. "hey assistant gym at 7am" -> "gym at 7am")
+      const cleanInstruction = stripLeadingWakePhrase(
+        trimmed,
+        prefs.wakePhrase,
+      );
+      if (!cleanInstruction) {
+        return;
+      }
+
+      clearAssistantIdleTimer();
+      setFollowUpWakeDetected(false);
+
+      // Check for closing phrase ("done", "that's all", "thank you", "cancel")
+      if (isClosingPhrase(cleanInstruction)) {
+        setAssistantPhase("done");
+        void Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        ).catch(() => {});
+
+        if (prefs.spokenFeedbackEnabled) {
+          setIsTtsSpeaking(true);
+          await speakText("You're all set! Have a great day.", {
+            token,
+            onStart: () => setIsTtsSpeaking(true),
+            onDone: () => {
+              setIsTtsSpeaking(false);
+              setTimeout(() => handleCloseAssistant(), 1000);
+            },
+            onStopped: () => {
+              setIsTtsSpeaking(false);
+              handleCloseAssistant();
+            },
+            onError: () => {
+              setIsTtsSpeaking(false);
+              handleCloseAssistant();
+            },
+          });
+        } else {
+          setTimeout(() => handleCloseAssistant(), 1200);
+        }
+        return;
+      }
+
+      // User dictated a new routine or change ("also remind me to take meds at noon")
+      setFollowUpWakeDetected(false);
+      setAssistantPhase("thinking");
+      await submitPlanText(cleanInstruction);
+    },
+    [
+      clearAssistantIdleTimer,
+      handleCloseAssistant,
+      prefs.spokenFeedbackEnabled,
+      prefs.wakePhrase,
+      submitPlanText,
+      token,
+      startAssistantIdleTimer,
+    ],
+  );
 
   const handleWakeDetected = useCallback(
     ({
@@ -328,25 +596,70 @@ export function HomeScreen() {
       setWakeFeedback(`✨ "${phrase}" detected!`);
       setTimeout(() => setWakeFeedback(null), 3500);
 
-      if (trailingTranscript && trailingTranscript.length > 2) {
-        // Continuous utterance: "Hey Assistant gym at 7am and lunch at 1pm"
-        setPlanText(trailingTranscript);
-        void submitPlanText(trailingTranscript);
+      clearAssistantIdleTimer();
+      setFollowUpWakeDetected(false);
+      setAssistantOverlayOpen(true);
+      setAssistantSpokenMessage("");
+      setAssistantCreatedReminders([]);
+      setAssistantError(null);
+
+      const cleanTrailing = stripLeadingWakePhrase(
+        trailingTranscript,
+        prefs.wakePhrase,
+      );
+
+      if (cleanTrailing && cleanTrailing.length > 2) {
+        // Continuous single-breath utterance: "Hey Assistant gym at 7am and lunch at 1pm"
+        setAssistantLiveTranscript(cleanTrailing);
+        setAssistantPhase("thinking");
+        void submitPlanText(cleanTrailing);
       } else {
-        // Just the wake phrase spoken: activate voice sheet to capture plan
-        setVoiceSheetOpen(true);
+        // Just the wake phrase spoken: open overlay in listening mode
+        setFollowUpWakeDetected(true);
+        setAssistantLiveTranscript("");
+        setAssistantPhase("listening");
+        wakeWordRef.current?.clearTranscript();
       }
     },
-    [submitPlanText],
+    [clearAssistantIdleTimer, submitPlanText, prefs.wakePhrase],
   );
 
   const wakeWord = useWakeWord({
     enabled: prefs.assistantEnabled && prefs.microphoneEnabled,
     wakePhrase: prefs.wakePhrase,
     sensitivity: prefs.wakeSensitivity,
-    paused: voiceSheetOpen || isVoiceBusy || busy,
+    paused: voiceSheetOpen || isVoiceBusy || busy || isTtsSpeaking,
+    mode: assistantOverlayOpen ? "conversation" : "wake",
     onWake: handleWakeDetected,
+    onFollowUpWake: (_phrase) => {
+      clearAssistantIdleTimer();
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+        () => {},
+      );
+      setFollowUpWakeDetected(true);
+      setAssistantPhase("listening");
+      setAssistantLiveTranscript("");
+      wakeWordRef.current?.clearTranscript();
+      startAssistantIdleTimer();
+    },
+    onTranscript: (transcript) => {
+      if (assistantOverlayOpenRef.current && !isTtsSpeakingRef.current) {
+        clearAssistantIdleTimer();
+        setAssistantLiveTranscript(transcript);
+        if (transcript.trim().length > 0) {
+          setAssistantPhase("listening");
+        }
+      }
+    },
+    onUtteranceComplete: (transcript) => {
+      if (assistantOverlayOpenRef.current && !isTtsSpeakingRef.current) {
+        void handleAssistantUtterance(transcript);
+      }
+    },
   });
+
+  const wakeWordRef = useRef(wakeWord);
+  wakeWordRef.current = wakeWord;
 
   async function handleVoiceRecorded(uri: string) {
     if (!token) {
@@ -533,11 +846,29 @@ export function HomeScreen() {
         </View>
 
         {prefs.assistantEnabled && prefs.microphoneEnabled ? (
-          <View
-            style={[
+          <Pressable
+            onPress={() => {
+              if (!wakeWord.isNativeAvailable) return;
+              if (wakeWord.hasPermission === false) {
+                void wakeWord.requestPermission();
+                return;
+              }
+              clearAssistantIdleTimer();
+              setAssistantOverlayOpen(true);
+              setAssistantPhase("listening");
+              setAssistantLiveTranscript("");
+              setAssistantSpokenMessage("");
+              setAssistantCreatedReminders([]);
+              setAssistantError(null);
+              wakeWord.clearTranscript();
+            }}
+            style={({ pressed }) => [
               styles.assistantBanner,
               wakeFeedback ? styles.assistantBannerDetected : null,
+              pressed ? styles.pressed : null,
             ]}
+            accessibilityRole="button"
+            accessibilityLabel="Tap to activate voice assistant session"
           >
             <View style={styles.assistantBannerHeader}>
               <View style={styles.assistantBannerTitleGroup}>
@@ -570,7 +901,10 @@ export function HomeScreen() {
 
               {wakeWord.hasPermission === false ? (
                 <Pressable
-                  onPress={() => void wakeWord.requestPermission()}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    void wakeWord.requestPermission();
+                  }}
                   style={styles.enableButton}
                 >
                   <Text style={styles.enableButtonText}>Grant</Text>
@@ -583,7 +917,7 @@ export function HomeScreen() {
                 Heard: "{wakeWord.lastTranscript}"
               </Text>
             ) : null}
-          </View>
+          </Pressable>
         ) : null}
 
         <View style={styles.composerCard}>
@@ -726,6 +1060,10 @@ export function HomeScreen() {
         onChangeWakeSensitivity={(value) => {
           void prefs.setWakeSensitivity(value);
         }}
+        spokenFeedbackEnabled={prefs.spokenFeedbackEnabled}
+        onToggleSpokenFeedback={(value) => {
+          void prefs.setSpokenFeedbackEnabled(value);
+        }}
         ping={ping}
         testPush={testPush}
         onPing={() => {
@@ -753,6 +1091,36 @@ export function HomeScreen() {
         }}
         onError={(message) => {
           setPlan({ status: "error", message });
+        }}
+      />
+
+      <AssistantOverlay
+        visible={assistantOverlayOpen}
+        phase={assistantPhase}
+        liveTranscript={assistantLiveTranscript}
+        assistantMessage={assistantSpokenMessage}
+        errorMessage={assistantError}
+        createdReminders={assistantCreatedReminders}
+        isTtsSpeaking={isTtsSpeaking}
+        followUpWakeDetected={followUpWakeDetected}
+        spokenFeedbackEnabled={prefs.spokenFeedbackEnabled}
+        onToggleSpokenFeedback={() => {
+          void prefs.setSpokenFeedbackEnabled(!prefs.spokenFeedbackEnabled);
+        }}
+        onStopSpeaking={() => {
+          void stopSpeaking();
+          setIsTtsSpeaking(false);
+          setFollowUpWakeDetected(true);
+          setAssistantPhase("listening");
+          setAssistantLiveTranscript("");
+          wakeWordRef.current?.clearTranscript();
+          startAssistantIdleTimer();
+        }}
+        onDone={() => {
+          handleCloseAssistant();
+        }}
+        onClose={() => {
+          handleCloseAssistant();
         }}
       />
     </View>

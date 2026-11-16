@@ -26,6 +26,8 @@ export type AppPreferences = {
   wakePhrase: string;
   /** Detection sensitivity for the wake word engine. */
   wakeSensitivity: WakeSensitivity;
+  /** Whether the assistant reads its confirmation / reply aloud using native TTS. */
+  spokenFeedbackEnabled: boolean;
 };
 
 const DEFAULTS: AppPreferences = {
@@ -35,6 +37,7 @@ const DEFAULTS: AppPreferences = {
   assistantEnabled: true,
   wakePhrase: "hey assistant",
   wakeSensitivity: "medium",
+  spokenFeedbackEnabled: true,
 };
 
 type AppPreferencesContextValue = AppPreferences & {
@@ -45,6 +48,7 @@ type AppPreferencesContextValue = AppPreferences & {
   setAssistantEnabled: (value: boolean) => Promise<void>;
   setWakePhrase: (value: string) => Promise<void>;
   setWakeSensitivity: (value: WakeSensitivity) => Promise<void>;
+  setSpokenFeedbackEnabled: (value: boolean) => Promise<void>;
 };
 
 const AppPreferencesContext = createContext<AppPreferencesContextValue | null>(
@@ -126,6 +130,13 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
     [persist, prefs],
   );
 
+  const setSpokenFeedbackEnabled = useCallback(
+    async (value: boolean) => {
+      await persist({ ...prefs, spokenFeedbackEnabled: value });
+    },
+    [persist, prefs],
+  );
+
   const value = useMemo(
     () => ({
       ...prefs,
@@ -136,6 +147,7 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
       setAssistantEnabled,
       setWakePhrase,
       setWakeSensitivity,
+      setSpokenFeedbackEnabled,
     }),
     [
       prefs,
@@ -146,6 +158,7 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
       setAssistantEnabled,
       setWakePhrase,
       setWakeSensitivity,
+      setSpokenFeedbackEnabled,
     ],
   );
 

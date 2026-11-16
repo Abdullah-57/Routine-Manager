@@ -530,6 +530,10 @@ export function CalendarScreen() {
         onChangeWakeSensitivity={(value) => {
           void prefs.setWakeSensitivity(value);
         }}
+        spokenFeedbackEnabled={prefs.spokenFeedbackEnabled}
+        onToggleSpokenFeedback={(value) => {
+          void prefs.setSpokenFeedbackEnabled(value);
+        }}
         ping={ping}
         testPush={testPush}
         onPing={() => {
