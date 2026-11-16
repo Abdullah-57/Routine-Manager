@@ -1,4 +1,6 @@
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "");
+import Constants from "expo-constants";
+
+const ENV_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "");
 
 export class ApiError extends Error {
   constructor(
@@ -12,14 +14,31 @@ export class ApiError extends Error {
 }
 
 export function getBaseUrl(): string {
-  if (!BASE_URL) {
-    throw new ApiError(
-      "EXPO_PUBLIC_API_URL is not set. Add it to mobile/.env and restart Expo.",
-      0,
-      "CONFIG_ERROR",
-    );
+  // In development with Metro, extract the PC host IP so phone always connects to the backend
+  if (__DEV__ && Constants.expoConfig?.hostUri) {
+    const metroHost = Constants.expoConfig.hostUri.split(":")[0];
+    if (metroHost && metroHost !== "localhost" && metroHost !== "127.0.0.1") {
+      // If ENV_BASE_URL is missing or uses a local IP, use Metro's active host
+      if (
+        !ENV_BASE_URL ||
+        /^(http:\/\/(?:192\.168\.|10\.|172\.(?:1[6-9]|2[0-9]|3[01])\.)\d+)/.test(
+          ENV_BASE_URL,
+        )
+      ) {
+        return `http://${metroHost}:4000`;
+      }
+    }
   }
-  return BASE_URL;
+
+  if (ENV_BASE_URL) {
+    return ENV_BASE_URL;
+  }
+
+  throw new ApiError(
+    "EXPO_PUBLIC_API_URL is not set. Add it to mobile/.env and restart Expo.",
+    0,
+    "CONFIG_ERROR",
+  );
 }
 
 type ApiFetchOptions = Omit<RequestInit, "body" | "headers"> & {

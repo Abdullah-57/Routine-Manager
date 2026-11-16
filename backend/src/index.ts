@@ -34,8 +34,8 @@ async function start() {
 
   await connectDb();
 
-  app.listen(port, () => {
-    console.log(`routine-manager-api listening on http://localhost:${port}`);
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`routine-manager-api listening on http://0.0.0.0:${port}`);
   });
 }
 

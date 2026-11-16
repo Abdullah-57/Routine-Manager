@@ -14,7 +14,9 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "NSSpeechRecognitionUsageDescription": "Allow Routine Manager to recognize 'Hey Assistant' wake phrase and spoken routines.",
+        "NSMicrophoneUsageDescription": "Allow Routine Manager to access the microphone for hands-free assistant voice commands."
       }
     },
     "android": {
@@ -48,6 +50,7 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECEIVE_BOOT_COMPLETED"
@@ -89,7 +92,14 @@
       "expo-asset",
       "expo-image",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Routine Manager to record voice for hands-free wake-word detection and assistant commands.",
+          "speechRecognitionPermission": "Allow Routine Manager to recognize speech for voice assistant commands."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

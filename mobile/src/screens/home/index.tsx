@@ -37,6 +37,7 @@ import {
   syncLocalNotificationsForReminders,
 } from "@/notifications/local-reminders";
 import { useAppPreferences } from "@/preferences/app-preferences";
+import { useWakeWord } from "@/assistant/wake-word-service";
 import { radius, shadows, spacing } from "@/theme";
 
 type PingState =
@@ -167,6 +168,7 @@ export function HomeScreen() {
   const [isVoiceBusy, setIsVoiceBusy] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
+  const [wakeFeedback, setWakeFeedback] = useState<string | null>(null);
   const isSubmittingRef = useRef(false);
 
   const timezone = useMemo(
@@ -270,43 +272,81 @@ export function HomeScreen() {
     setShowAllReminders(false);
   }
 
+  const submitPlanText = useCallback(
+    async (rawText: string) => {
+      if (isSubmittingRef.current || isVoiceBusy) return;
+
+      const text = rawText.trim();
+      if (!text) {
+        setPlan({
+          status: "error",
+          message: "Type a plan first — empty text cannot be submitted.",
+        });
+        return;
+      }
+
+      if (!token) {
+        setPlan({
+          status: "error",
+          message: "You are not signed in. Log in again, then retry.",
+        });
+        return;
+      }
+
+      isSubmittingRef.current = true;
+      setPlan({ status: "loading" });
+
+      try {
+        const result = await parseRoutine(token, { text, timezone });
+        await applyParseSuccess(result);
+        await refreshReminders(token);
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : "Could not plan your day. Check the network and try again.";
+        setPlan({ status: "error", message });
+      } finally {
+        isSubmittingRef.current = false;
+      }
+    },
+    [isVoiceBusy, token, timezone, refreshReminders],
+  );
+
   async function handlePlanSubmit() {
-    if (isSubmittingRef.current || isVoiceBusy) return;
-
-    const text = planText.trim();
-    if (!text) {
-      setPlan({
-        status: "error",
-        message: "Type a plan first — empty text cannot be submitted.",
-      });
-      return;
-    }
-
-    if (!token) {
-      setPlan({
-        status: "error",
-        message: "You are not signed in. Log in again, then retry.",
-      });
-      return;
-    }
-
-    isSubmittingRef.current = true;
-    setPlan({ status: "loading" });
-
-    try {
-      const result = await parseRoutine(token, { text, timezone });
-      await applyParseSuccess(result);
-      await refreshReminders(token);
-    } catch (error) {
-      const message =
-        error instanceof ApiError
-          ? error.message
-          : "Could not plan your day. Check the network and try again.";
-      setPlan({ status: "error", message });
-    } finally {
-      isSubmittingRef.current = false;
-    }
+    await submitPlanText(planText);
   }
+
+  const handleWakeDetected = useCallback(
+    ({
+      phrase,
+      trailingTranscript,
+    }: {
+      phrase: string;
+      trailingTranscript: string;
+    }) => {
+      setWakeFeedback(`✨ "${phrase}" detected!`);
+      setTimeout(() => setWakeFeedback(null), 3500);
+
+      if (trailingTranscript && trailingTranscript.length > 2) {
+        // Continuous utterance: "Hey Assistant gym at 7am and lunch at 1pm"
+        setPlanText(trailingTranscript);
+        void submitPlanText(trailingTranscript);
+      } else {
+        // Just the wake phrase spoken: activate voice sheet to capture plan
+        setVoiceSheetOpen(true);
+      }
+    },
+    [submitPlanText],
+  );
+
+  const wakeWord = useWakeWord({
+    enabled: prefs.assistantEnabled && prefs.microphoneEnabled,
+    wakePhrase: prefs.wakePhrase,
+    sensitivity: prefs.wakeSensitivity,
+    paused: voiceSheetOpen || isVoiceBusy || busy,
+    onWake: handleWakeDetected,
+  });
 
   async function handleVoiceRecorded(uri: string) {
     if (!token) {
@@ -492,6 +532,60 @@ export function HomeScreen() {
           </View>
         </View>
 
+        {prefs.assistantEnabled && prefs.microphoneEnabled ? (
+          <View
+            style={[
+              styles.assistantBanner,
+              wakeFeedback ? styles.assistantBannerDetected : null,
+            ]}
+          >
+            <View style={styles.assistantBannerHeader}>
+              <View style={styles.assistantBannerTitleGroup}>
+                <View
+                  style={[
+                    styles.pulseDot,
+                    wakeFeedback
+                      ? styles.pulseDotDetected
+                      : wakeWord.isListening ||
+                          (prefs.assistantEnabled &&
+                            prefs.microphoneEnabled &&
+                            wakeWord.hasPermission !== false)
+                        ? styles.pulseDotActive
+                        : styles.pulseDotIdle,
+                  ]}
+                />
+                <Text style={styles.assistantBannerTitle}>
+                  {wakeFeedback
+                    ? wakeFeedback
+                    : !wakeWord.isNativeAvailable
+                      ? "Hands-free needs dev build (Use mic button below)"
+                      : wakeWord.hasPermission === false
+                        ? "Microphone permission needed"
+                        : wakeWord.isListening ||
+                            (prefs.assistantEnabled && prefs.microphoneEnabled)
+                          ? `Listening for "${prefs.wakePhrase}"`
+                          : "Assistant standby"}
+                </Text>
+              </View>
+
+              {wakeWord.hasPermission === false ? (
+                <Pressable
+                  onPress={() => void wakeWord.requestPermission()}
+                  style={styles.enableButton}
+                >
+                  <Text style={styles.enableButtonText}>Grant</Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            {wakeWord.lastTranscript && !wakeFeedback ? (
+              <Text style={styles.assistantHeardText} numberOfLines={1}>
+                Heard: "{wakeWord.lastTranscript}"
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         <View style={styles.composerCard}>
           <AiPlanComposer
             value={planText}
@@ -613,6 +707,10 @@ export function HomeScreen() {
         microphoneEnabled={prefs.microphoneEnabled}
         pushNotificationsEnabled={prefs.pushNotificationsEnabled}
         use24HourClock={prefs.use24HourClock}
+        assistantEnabled={prefs.assistantEnabled}
+        wakePhrase={prefs.wakePhrase}
+        wakeSensitivity={prefs.wakeSensitivity}
+        isAssistantListening={wakeWord.isListening}
         onToggleMicrophone={(value) => {
           void handleToggleMicrophone(value);
         }}
@@ -621,6 +719,12 @@ export function HomeScreen() {
         }}
         onToggle24Hour={(value) => {
           void prefs.setUse24HourClock(value);
+        }}
+        onToggleAssistant={(value) => {
+          void prefs.setAssistantEnabled(value);
+        }}
+        onChangeWakeSensitivity={(value) => {
+          void prefs.setWakeSensitivity(value);
         }}
         ping={ping}
         testPush={testPush}
@@ -709,6 +813,68 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: -0.4,
     color: "#0F172A",
+  },
+  assistantBanner: {
+    backgroundColor: "#F1F5F9",
+    borderRadius: radius.md,
+    borderCurve: "continuous",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  assistantBannerDetected: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#3B82F6",
+    borderWidth: 1.5,
+  },
+  assistantBannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  assistantBannerTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    flex: 1,
+  },
+  pulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  pulseDotActive: {
+    backgroundColor: "#16A34A",
+  },
+  pulseDotDetected: {
+    backgroundColor: "#2563EB",
+  },
+  pulseDotIdle: {
+    backgroundColor: "#94A3B8",
+  },
+  assistantBannerTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#1E293B",
+  },
+  assistantHeardText: {
+    fontSize: 12,
+    color: "#64748B",
+    fontStyle: "italic",
+    paddingLeft: spacing.sm + 4,
+  },
+  enableButton: {
+    backgroundColor: "#2563EB",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  enableButtonText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
   },
   composerCard: {
     gap: spacing.sm + 2,

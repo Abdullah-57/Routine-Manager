@@ -511,6 +511,10 @@ export function CalendarScreen() {
         microphoneEnabled={prefs.microphoneEnabled}
         pushNotificationsEnabled={prefs.pushNotificationsEnabled}
         use24HourClock={prefs.use24HourClock}
+        assistantEnabled={prefs.assistantEnabled}
+        wakePhrase={prefs.wakePhrase}
+        wakeSensitivity={prefs.wakeSensitivity}
+        isAssistantListening={prefs.assistantEnabled && prefs.microphoneEnabled}
         onToggleMicrophone={(value) => {
           void handleToggleMicrophone(value);
         }}
@@ -519,6 +523,12 @@ export function CalendarScreen() {
         }}
         onToggle24Hour={(value) => {
           void prefs.setUse24HourClock(value);
+        }}
+        onToggleAssistant={(value) => {
+          void prefs.setAssistantEnabled(value);
+        }}
+        onChangeWakeSensitivity={(value) => {
+          void prefs.setWakeSensitivity(value);
         }}
         ping={ping}
         testPush={testPush}

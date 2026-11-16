@@ -11,6 +11,8 @@ import {
 
 const STORAGE_KEY = "routine-manager.app-preferences.v1";
 
+export type WakeSensitivity = "low" | "medium" | "high";
+
 export type AppPreferences = {
   /** App-level gate for using the mic (still needs OS permission). */
   microphoneEnabled: boolean;
@@ -18,12 +20,21 @@ export type AppPreferences = {
   pushNotificationsEnabled: boolean;
   /** Prefer 24-hour clock in reminder time labels. */
   use24HourClock: boolean;
+  /** Whether hands-free voice assistant listening is active. */
+  assistantEnabled: boolean;
+  /** Keyword/phrase that activates the assistant. */
+  wakePhrase: string;
+  /** Detection sensitivity for the wake word engine. */
+  wakeSensitivity: WakeSensitivity;
 };
 
 const DEFAULTS: AppPreferences = {
   microphoneEnabled: true,
   pushNotificationsEnabled: true,
   use24HourClock: false,
+  assistantEnabled: true,
+  wakePhrase: "hey assistant",
+  wakeSensitivity: "medium",
 };
 
 type AppPreferencesContextValue = AppPreferences & {
@@ -31,6 +42,9 @@ type AppPreferencesContextValue = AppPreferences & {
   setMicrophoneEnabled: (value: boolean) => Promise<void>;
   setPushNotificationsEnabled: (value: boolean) => Promise<void>;
   setUse24HourClock: (value: boolean) => Promise<void>;
+  setAssistantEnabled: (value: boolean) => Promise<void>;
+  setWakePhrase: (value: string) => Promise<void>;
+  setWakeSensitivity: (value: WakeSensitivity) => Promise<void>;
 };
 
 const AppPreferencesContext = createContext<AppPreferencesContextValue | null>(
@@ -91,6 +105,27 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
     [persist, prefs],
   );
 
+  const setAssistantEnabled = useCallback(
+    async (value: boolean) => {
+      await persist({ ...prefs, assistantEnabled: value });
+    },
+    [persist, prefs],
+  );
+
+  const setWakePhrase = useCallback(
+    async (value: string) => {
+      await persist({ ...prefs, wakePhrase: value.trim().toLowerCase() || "hey assistant" });
+    },
+    [persist, prefs],
+  );
+
+  const setWakeSensitivity = useCallback(
+    async (value: WakeSensitivity) => {
+      await persist({ ...prefs, wakeSensitivity: value });
+    },
+    [persist, prefs],
+  );
+
   const value = useMemo(
     () => ({
       ...prefs,
@@ -98,6 +133,9 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
       setMicrophoneEnabled,
       setPushNotificationsEnabled,
       setUse24HourClock,
+      setAssistantEnabled,
+      setWakePhrase,
+      setWakeSensitivity,
     }),
     [
       prefs,
@@ -105,6 +143,9 @@ export function AppPreferencesProvider({ children }: { children: ReactNode }) {
       setMicrophoneEnabled,
       setPushNotificationsEnabled,
       setUse24HourClock,
+      setAssistantEnabled,
+      setWakePhrase,
+      setWakeSensitivity,
     ],
   );
 

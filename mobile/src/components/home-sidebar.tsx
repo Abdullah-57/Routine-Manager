@@ -17,6 +17,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "@/components/ui/app-button";
 import { FeedbackBanner } from "@/components/ui/feedback-banner";
+import type { WakeSensitivity } from "@/preferences/app-preferences";
 import { radius, shadows, spacing } from "@/theme";
 
 type ToolState =
@@ -31,9 +32,15 @@ type HomeSidebarProps = {
   microphoneEnabled: boolean;
   pushNotificationsEnabled: boolean;
   use24HourClock: boolean;
+  assistantEnabled: boolean;
+  wakePhrase: string;
+  wakeSensitivity: WakeSensitivity;
+  isAssistantListening?: boolean;
   onToggleMicrophone: (value: boolean) => void;
   onTogglePush: (value: boolean) => void;
   onToggle24Hour: (value: boolean) => void;
+  onToggleAssistant: (value: boolean) => void;
+  onChangeWakeSensitivity: (value: WakeSensitivity) => void;
   ping: ToolState;
   testPush: ToolState;
   onPing: () => void;
@@ -67,9 +74,15 @@ export function HomeSidebar({
   microphoneEnabled,
   pushNotificationsEnabled,
   use24HourClock,
+  assistantEnabled,
+  wakePhrase,
+  wakeSensitivity,
+  isAssistantListening = false,
   onToggleMicrophone,
   onTogglePush,
   onToggle24Hour,
+  onToggleAssistant,
+  onChangeWakeSensitivity,
   ping,
   testPush,
   onPing,
@@ -128,6 +141,7 @@ export function HomeSidebar({
             <Text style={styles.subtitle}>Quick controls for this device</Text>
 
             <View style={styles.settingsBlock}>
+              <Text style={styles.sectionLabel}>System</Text>
               <SettingRow
                 label="Microphone Access"
                 value={microphoneEnabled}
@@ -143,6 +157,74 @@ export function HomeSidebar({
                 value={use24HourClock}
                 onValueChange={onToggle24Hour}
               />
+
+              <View style={styles.divider} />
+
+              <Text style={styles.sectionLabel}>Hands-Free Voice Assistant</Text>
+              <SettingRow
+                label="Wake-Word Activation"
+                value={assistantEnabled}
+                onValueChange={onToggleAssistant}
+              />
+
+              {assistantEnabled ? (
+                <View style={styles.assistantDetailsCard}>
+                  <View style={styles.assistantStatusRow}>
+                    <Text style={styles.phraseLabel}>Detection Status</Text>
+                    <View style={styles.statusIndicatorWrapper}>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          assistantEnabled && microphoneEnabled
+                            ? styles.statusDotActive
+                            : styles.statusDotStandby,
+                        ]}
+                      />
+                      <Text style={styles.statusText}>
+                        {!assistantEnabled
+                          ? "Standby"
+                          : !microphoneEnabled
+                            ? "Mic Disabled"
+                            : "Listening"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.phraseRow}>
+                    <Text style={styles.phraseLabel}>Wake Phrase</Text>
+                    <Text style={styles.phraseValue}>"{wakePhrase}"</Text>
+                  </View>
+
+                  <View style={styles.sensitivityRow}>
+                    <Text style={styles.phraseLabel}>Sensitivity</Text>
+                    <View style={styles.sensitivityButtonGroup}>
+                      {(["low", "medium", "high"] as WakeSensitivity[]).map(
+                        (level) => (
+                          <Pressable
+                            key={level}
+                            style={[
+                              styles.sensitivityButton,
+                              wakeSensitivity === level &&
+                                styles.sensitivityButtonActive,
+                            ]}
+                            onPress={() => onChangeWakeSensitivity(level)}
+                          >
+                            <Text
+                              style={[
+                                styles.sensitivityButtonText,
+                                wakeSensitivity === level &&
+                                  styles.sensitivityButtonTextActive,
+                              ]}
+                            >
+                              {level.charAt(0).toUpperCase() + level.slice(1)}
+                            </Text>
+                          </Pressable>
+                        ),
+                      )}
+                    </View>
+                  </View>
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.divider} />
@@ -263,6 +345,89 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#0F172A",
+  },
+  assistantDetailsCard: {
+    backgroundColor: "#F1F5F9",
+    borderRadius: radius.md,
+    borderCurve: "continuous",
+    padding: spacing.sm + 2,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  assistantStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  statusIndicatorWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusDotActive: {
+    backgroundColor: "#16A34A",
+  },
+  statusDotStandby: {
+    backgroundColor: "#EAB308",
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#0F172A",
+  },
+  phraseRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  phraseLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  phraseValue: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  sensitivityRow: {
+    gap: 6,
+  },
+  sensitivityButtonGroup: {
+    flexDirection: "row",
+    gap: spacing.xs,
+    backgroundColor: "#E2E8F0",
+    padding: 3,
+    borderRadius: radius.sm,
+  },
+  sensitivityButton: {
+    flex: 1,
+    paddingVertical: 6,
+    alignItems: "center",
+    borderRadius: 6,
+  },
+  sensitivityButtonActive: {
+    backgroundColor: "#FFFFFF",
+    boxShadow: shadows.subtle,
+  },
+  sensitivityButtonText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  sensitivityButtonTextActive: {
+    color: "#0F172A",
+    fontWeight: "700",
   },
   divider: {
     height: 2,
