@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -38,6 +39,15 @@ type LoadState =
   | { status: "loading" }
   | { status: "ready"; reminder: ReminderSummary }
   | { status: "error"; message: string };
+
+type ReminderKind = "simple" | "meeting" | "call" | "custom";
+
+const KIND_OPTIONS: Array<{ value: ReminderKind; label: string; icon: string }> = [
+  { value: "simple", label: "Reminder", icon: "⏰" },
+  { value: "meeting", label: "Meeting", icon: "🎥" },
+  { value: "call", label: "Call", icon: "📞" },
+  { value: "custom", label: "Custom", icon: "✨" },
+];
 
 const STATUS_OPTIONS: ReminderStatus[] = [
   "scheduled",
@@ -77,6 +87,11 @@ export function ReminderDetailScreen() {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [status, setStatus] = useState<ReminderStatus>("scheduled");
+  const [kind, setKind] = useState<ReminderKind>("simple");
+  const [meetLink, setMeetLink] = useState("");
+  const [attendees, setAttendees] = useState<
+    Array<{ name?: string | null; email?: string | null; inviteSentAt?: string | null }>
+  >([]);
   const [startLocal, setStartLocal] = useState("");
   const [endLocal, setEndLocal] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -102,6 +117,9 @@ export function ReminderDetailScreen() {
           ? reminder.status
           : "scheduled") as ReminderStatus,
       );
+      setKind(reminder.kind ?? "simple");
+      setMeetLink(reminder.action?.meetLink ?? "");
+      setAttendees(reminder.action?.attendees ?? []);
       setStartLocal(toLocalDateTimeInput(reminder.startAt, tz));
       setEndLocal(
         reminder.endAt ? toLocalDateTimeInput(reminder.endAt, tz) : "",
@@ -180,6 +198,20 @@ export function ReminderDetailScreen() {
         title: trimmedTitle,
         notes: notes.trim(),
         status,
+        kind,
+        action:
+          meetLink.trim() || attendees.length > 0
+            ? {
+                type: meetLink.trim()
+                  ? "meeting_link"
+                  : kind === "call"
+                    ? "call"
+                    : "none",
+                status: "done",
+                meetLink: meetLink.trim() || null,
+                attendees,
+              }
+            : undefined,
         startAt: startAtISO,
         endAt: endAtISO,
         timezone,
@@ -297,6 +329,113 @@ export function ReminderDetailScreen() {
               <Text style={styles.screenTitle}>Edit reminder</Text>
             </View>
 
+            {kind === "meeting" || meetLink || attendees.length > 0 ? (
+              <View style={styles.meetingCard}>
+                <View style={styles.meetingCardHeader}>
+                  <View style={styles.meetingCardTitleRow}>
+                    <Text style={styles.meetingCardIcon}>🎥</Text>
+                    <View>
+                      <Text style={styles.meetingCardTitle}>Video Meeting Room</Text>
+                      <Text style={styles.meetingCardSubtitle}>
+                        {meetLink ? "Instant room ready" : "Meeting details"}
+                      </Text>
+                    </View>
+                  </View>
+                  {meetLink ? (
+                    <View style={styles.liveBadge}>
+                      <Text style={styles.liveBadgeText}>Ready</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {meetLink ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Join Video Meeting Now"
+                    onPress={() => {
+                      void Linking.openURL(meetLink).catch((err) => {
+                        Alert.alert("Could not open meeting", err?.message || String(err));
+                      });
+                    }}
+                    style={({ pressed }) => [
+                      styles.joinButton,
+                      pressed ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text style={styles.joinButtonIcon}>📹</Text>
+                    <Text style={styles.joinButtonText}>Join Video Meeting Now</Text>
+                  </Pressable>
+                ) : null}
+
+                {attendees.length > 0 ? (
+                  <View style={styles.attendeesContainer}>
+                    <Text style={styles.attendeesHeading}>
+                      Invited Attendees ({attendees.length})
+                    </Text>
+                    {attendees.map((att, idx) => (
+                      <View key={idx} style={styles.attendeeItem}>
+                        <View style={styles.attendeeAvatar}>
+                          <Text style={styles.attendeeAvatarText}>
+                            {(att.name || att.email || "A").charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={styles.attendeeTextContainer}>
+                          <Text style={styles.attendeeName}>
+                            {att.name || "Attendee"}
+                          </Text>
+                          {att.email ? (
+                            <Text style={styles.attendeeEmail}>{att.email}</Text>
+                          ) : null}
+                        </View>
+                        {att.inviteSentAt ? (
+                          <View style={styles.inviteSentChip}>
+                            <Text style={styles.inviteSentText}>✉️ Invite Sent</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Type / Kind</Text>
+              <View style={styles.statusRow}>
+                {KIND_OPTIONS.map((opt) => {
+                  const selected = kind === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      accessibilityRole="button"
+                      disabled={isSaving || isDeleting}
+                      onPress={() => {
+                        setKind(opt.value);
+                        setFormError(null);
+                        setSaveMessage(null);
+                      }}
+                      style={({ pressed }) => [
+                        styles.statusChip,
+                        styles.kindChip,
+                        selected ? styles.statusChipSelected : null,
+                        pressed ? styles.pressed : null,
+                      ]}
+                    >
+                      <Text style={styles.kindChipIcon}>{opt.icon}</Text>
+                      <Text
+                        style={[
+                          styles.kindChipLabel,
+                          selected ? styles.kindChipLabelSelected : null,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
             <View style={styles.card}>
               <Text style={styles.fieldLabel}>Title</Text>
               <AppTextField
@@ -327,6 +466,27 @@ export function ReminderDetailScreen() {
                 placeholderTextColor="#94A3B8"
                 selectionColor="#1D4ED8"
               />
+
+              {kind === "meeting" || meetLink ? (
+                <>
+                  <Text style={styles.fieldLabel}>Meeting Link</Text>
+                  <AppTextField
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="https://meet.jit.si/... or https://meet.google.com/..."
+                    value={meetLink}
+                    onChangeText={(next) => {
+                      setMeetLink(next);
+                      setFormError(null);
+                      setSaveMessage(null);
+                    }}
+                    editable={!isSaving && !isDeleting}
+                    placeholderTextColor="#94A3B8"
+                    selectionColor="#1D4ED8"
+                    style={styles.input}
+                  />
+                </>
+              ) : null}
             </View>
 
             <View style={styles.card}>
@@ -511,6 +671,131 @@ const styles = StyleSheet.create({
     borderColor: "rgba(37, 99, 235, 0.18)",
     boxShadow: shadows.subtle,
   },
+  meetingCard: {
+    gap: spacing.md,
+    padding: spacing.md + 2,
+    borderRadius: radius.xl,
+    borderCurve: "continuous",
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1.5,
+    borderColor: "rgba(37, 99, 235, 0.35)",
+    boxShadow: shadows.subtle,
+  },
+  meetingCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  meetingCardTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  meetingCardIcon: {
+    fontSize: 26,
+  },
+  meetingCardTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1E3A8A",
+  },
+  meetingCardSubtitle: {
+    fontSize: 12,
+    color: "#3B82F6",
+    fontWeight: "500",
+  },
+  liveBadge: {
+    backgroundColor: "#16A34A",
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+  },
+  liveBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  joinButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    backgroundColor: "#1D4ED8",
+    paddingVertical: spacing.md - 2,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    boxShadow: shadows.subtle,
+  },
+  joinButtonIcon: {
+    fontSize: 18,
+  },
+  joinButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  attendeesContainer: {
+    gap: spacing.xs + 2,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(37, 99, 235, 0.2)",
+  },
+  attendeesHeading: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1E40AF",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginBottom: spacing.xs,
+  },
+  attendeeItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(37, 99, 235, 0.15)",
+  },
+  attendeeAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attendeeAvatarText: {
+    color: "#1D4ED8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  attendeeTextContainer: {
+    flex: 1,
+  },
+  attendeeName: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#0F172A",
+  },
+  attendeeEmail: {
+    fontSize: 11,
+    color: "#64748B",
+  },
+  inviteSentChip: {
+    backgroundColor: "rgba(22, 163, 74, 0.1)",
+    paddingHorizontal: spacing.xs + 4,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+  },
+  inviteSentText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#15803D",
+  },
   fieldLabel: {
     fontSize: 12,
     fontWeight: "700",
@@ -547,6 +832,22 @@ const styles = StyleSheet.create({
   },
   statusChipSelected: {
     backgroundColor: "#1D4ED8",
+  },
+  kindChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  kindChipIcon: {
+    fontSize: 14,
+  },
+  kindChipLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  kindChipLabelSelected: {
+    color: "#FFFFFF",
   },
   statusChipLabel: {
     fontSize: 13,

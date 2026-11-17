@@ -7,6 +7,22 @@ import { startDateAndTimeInTimezone } from "../services/reminders";
 
 const statusEnum = z.enum(["scheduled", "completed", "cancelled"]);
 const sourceEnum = z.enum(["ai", "manual"]);
+const kindEnum = z.enum(["simple", "meeting", "call", "custom"]);
+
+const actionSchema = z.object({
+  type: z.enum(["meeting_link", "email", "call", "none"]).optional(),
+  status: z.enum(["pending", "done", "failed"]).optional(),
+  meetLink: z.string().trim().optional().nullable(),
+  attendees: z
+    .array(
+      z.object({
+        name: z.string().trim().optional(),
+        email: z.string().trim().optional(),
+        inviteSentAt: z.coerce.date().optional(),
+      }),
+    )
+    .optional(),
+});
 
 const createReminderSchema = z.object({
   title: z.string().trim().min(1),
@@ -17,6 +33,8 @@ const createReminderSchema = z.object({
   status: statusEnum.optional(),
   source: sourceEnum.optional(),
   localNotificationId: z.string().trim().optional(),
+  kind: kindEnum.optional(),
+  action: actionSchema.optional(),
 });
 
 const updateReminderSchema = z
@@ -29,6 +47,8 @@ const updateReminderSchema = z
     status: statusEnum.optional(),
     source: sourceEnum.optional(),
     localNotificationId: z.string().trim().nullable().optional(),
+    kind: kindEnum.optional(),
+    action: actionSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one field is required",
@@ -56,6 +76,13 @@ function publicReminder(reminder: {
   status: string;
   source: string;
   localNotificationId?: string | null;
+  kind?: string | null;
+  action?: {
+    type?: string | null;
+    status?: string | null;
+    meetLink?: string | null;
+    attendees?: any;
+  } | null;
   createdAt?: Date;
   updatedAt?: Date;
 }) {
@@ -70,6 +97,21 @@ function publicReminder(reminder: {
     status: reminder.status,
     source: reminder.source,
     localNotificationId: reminder.localNotificationId ?? null,
+    kind: reminder.kind ?? "simple",
+    action: reminder.action
+      ? {
+          type: reminder.action.type ?? "none",
+          status: reminder.action.status ?? "done",
+          meetLink: reminder.action.meetLink ?? null,
+          attendees: Array.isArray(reminder.action.attendees)
+            ? reminder.action.attendees.map((a: any) => ({
+                name: a.name ?? "",
+                email: a.email ?? "",
+                inviteSentAt: a.inviteSentAt ?? null,
+              }))
+            : [],
+        }
+      : null,
     createdAt: reminder.createdAt,
     updatedAt: reminder.updatedAt,
   };
@@ -155,6 +197,19 @@ remindersRouter.post("/", async (req, res) => {
     status: data.status ?? "scheduled",
     source: data.source ?? "manual",
     localNotificationId: data.localNotificationId,
+    kind: data.kind ?? "simple",
+    action: data.action
+      ? {
+          type: data.action.type ?? "none",
+          status: data.action.status ?? "done",
+          meetLink: data.action.meetLink ?? undefined,
+          attendees: (data.action.attendees ?? []).map((a: any) => ({
+            name: a.name || "",
+            email: a.email || "",
+            inviteSentAt: a.inviteSentAt ? new Date(a.inviteSentAt) : undefined,
+          })),
+        }
+      : undefined,
   });
 
   return res.status(201).json({ reminder: publicReminder(reminder) });
@@ -186,6 +241,21 @@ remindersRouter.patch("/:id", async (req, res) => {
   if (data.timezone !== undefined) reminder.timezone = data.timezone;
   if (data.status !== undefined) reminder.status = data.status;
   if (data.source !== undefined) reminder.source = data.source;
+  if (data.kind !== undefined) reminder.kind = data.kind;
+  if (data.action !== undefined) {
+    (reminder as any).action = data.action
+      ? {
+          type: data.action.type ?? reminder.action?.type ?? "none",
+          status: data.action.status ?? reminder.action?.status ?? "done",
+          meetLink: data.action.meetLink ?? reminder.action?.meetLink ?? undefined,
+          attendees: (data.action.attendees ?? reminder.action?.attendees ?? []).map((a: any) => ({
+            name: a.name || "",
+            email: a.email || "",
+            inviteSentAt: a.inviteSentAt ? new Date(a.inviteSentAt) : undefined,
+          })),
+        }
+      : undefined;
+  }
 
   if (data.startAt !== undefined) {
     let startAt = new Date(data.startAt);

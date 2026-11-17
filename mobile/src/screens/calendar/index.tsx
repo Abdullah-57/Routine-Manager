@@ -85,6 +85,8 @@ function AgendaRow({
   timeLabel,
   notes,
   status,
+  kind,
+  meetLink,
   onPressId,
 }: {
   id: string;
@@ -92,8 +94,13 @@ function AgendaRow({
   timeLabel: string;
   notes: string;
   status: string;
+  kind?: string;
+  meetLink?: string | null;
   onPressId: (id: string) => void;
 }) {
+  const isMeeting = kind === "meeting" || Boolean(meetLink);
+  const isCall = kind === "call";
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -108,10 +115,21 @@ function AgendaRow({
       </ThemedText>
       <View style={styles.agendaBody}>
         <View style={styles.agendaTitleRow}>
-          <ThemedText variant="headline" style={styles.agendaTitle}>
-            {title}
-          </ThemedText>
-          <StatusBadge status={status} />
+          <View style={styles.agendaTitleGroup}>
+            {isMeeting ? <Text style={styles.agendaKindIcon}>🎥</Text> : null}
+            {isCall ? <Text style={styles.agendaKindIcon}>📞</Text> : null}
+            <ThemedText variant="headline" style={styles.agendaTitle} numberOfLines={1}>
+              {title}
+            </ThemedText>
+          </View>
+          <View style={styles.agendaBadgeGroup}>
+            {isMeeting ? (
+              <View style={styles.agendaMeetBadge}>
+                <Text style={styles.agendaMeetBadgeText}>Meet</Text>
+              </View>
+            ) : null}
+            <StatusBadge status={status} />
+          </View>
         </View>
         {notes ? (
           <ThemedText
@@ -494,6 +512,8 @@ export function CalendarScreen() {
               title={item.title}
               notes={item.notes}
               status={item.status}
+              kind={item.kind}
+              meetLink={item.action?.meetLink}
               timeLabel={formatTimeOnly(
                 item.startAt,
                 reminderTz,
@@ -645,9 +665,36 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.sm,
   },
+  agendaTitleGroup: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  agendaKindIcon: {
+    fontSize: 16,
+  },
   agendaTitle: {
     flex: 1,
     color: "#0F172A",
+  },
+  agendaBadgeGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  agendaMeetBadge: {
+    backgroundColor: "rgba(22, 163, 74, 0.12)",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(22, 163, 74, 0.3)",
+  },
+  agendaMeetBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#15803D",
   },
   agendaNotes: {
     color: "#64748B",

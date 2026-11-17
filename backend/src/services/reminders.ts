@@ -275,6 +275,9 @@ export async function updateReminderForUser(
     startAtISO?: string;
     endAtISO?: string | null;
     status?: "scheduled" | "completed" | "cancelled";
+    kind?: "simple" | "meeting" | "call" | "custom";
+    meetLink?: string;
+    attendees?: Array<{ name?: string; email?: string }>;
   },
   timezone?: string,
 ): Promise<ReminderDto> {
@@ -293,6 +296,20 @@ export async function updateReminderForUser(
 
   if (input.title !== undefined) reminder.title = input.title.trim();
   if (input.notes !== undefined) reminder.notes = input.notes.trim();
+  if (input.kind !== undefined) reminder.kind = input.kind;
+
+  if (input.meetLink !== undefined || input.attendees !== undefined) {
+    (reminder as any).action = {
+      type: input.meetLink ? "meeting_link" : reminder.action?.type || "none",
+      status: reminder.action?.status || "done",
+      meetLink: input.meetLink ?? reminder.action?.meetLink ?? undefined,
+      attendees: (input.attendees ?? reminder.action?.attendees ?? []).map((a: any) => ({
+        name: a.name || "",
+        email: a.email || "",
+        inviteSentAt: a.inviteSentAt ? new Date(a.inviteSentAt) : new Date(),
+      })),
+    };
+  }
 
   if (input.startAtISO !== undefined) {
     let startAt = parseDate(input.startAtISO);

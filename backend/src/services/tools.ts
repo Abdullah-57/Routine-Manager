@@ -92,6 +92,23 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
             type: "string",
             enum: ["scheduled", "completed", "cancelled"],
           },
+          kind: {
+            type: "string",
+            enum: ["simple", "meeting", "call", "custom"],
+          },
+          meetLink: {
+            type: "string",
+          },
+          attendees: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                email: { type: "string" },
+              },
+            },
+          },
         },
         required: ["reminderId"],
         additionalProperties: false,
@@ -239,6 +256,9 @@ async function executeUpdateReminder(args: unknown, ctx: ToolContext) {
     startAtISO?: string;
     endAtISO?: string | null;
     status?: "scheduled" | "completed" | "cancelled";
+    kind?: "simple" | "meeting" | "call" | "custom";
+    meetLink?: string;
+    attendees?: Array<{ name?: string; email?: string }>;
   };
 
   const updated = await updateReminderForUser(ctx.userId, payload, ctx.timezone);

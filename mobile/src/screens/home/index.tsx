@@ -1,5 +1,5 @@
 import { AudioModule } from "expo-audio";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -140,21 +140,45 @@ function avatarLetter(user: {
 }
 
 function ReminderRow({
+  id,
   title,
   timeLabel,
   status,
+  kind,
+  meetLink,
   isNew,
+  onPress,
 }: {
+  id?: string;
   title: string;
   timeLabel: string;
   status: string;
+  kind?: string;
+  meetLink?: string | null;
   isNew?: boolean;
+  onPress?: () => void;
 }) {
-  return (
+  const isMeeting = kind === "meeting" || Boolean(meetLink);
+  const isCall = kind === "call";
+
+  const content = (
     <View style={[styles.reminderRow, isNew ? styles.reminderRowNew : null]}>
       <View style={styles.reminderHeader}>
-        <Text style={styles.reminderTitle}>{title}</Text>
-        {isNew ? <Text style={styles.newBadge}>New</Text> : null}
+        <View style={styles.reminderTitleRow}>
+          {isMeeting ? <Text style={styles.kindIcon}>🎥</Text> : null}
+          {isCall ? <Text style={styles.kindIcon}>📞</Text> : null}
+          <Text style={styles.reminderTitle} numberOfLines={1}>
+            {title}
+          </Text>
+        </View>
+        <View style={styles.badgeGroup}>
+          {isMeeting ? (
+            <View style={styles.meetPill}>
+              <Text style={styles.meetPillText}>Meet</Text>
+            </View>
+          ) : null}
+          {isNew ? <Text style={styles.newBadge}>New</Text> : null}
+        </View>
       </View>
       <View style={styles.reminderMetaRow}>
         <StatusBadge status={status} />
@@ -162,9 +186,25 @@ function ReminderRow({
       </View>
     </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`View details for ${title}`}
+        onPress={onPress}
+        style={({ pressed }) => [pressed ? styles.pressed : null]}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+
+  return content;
 }
 
 export function HomeScreen() {
+  const router = useRouter();
   const { user, token, logout } = useAuth();
   const prefs = useAppPreferences();
   const insets = useSafeAreaInsets();
@@ -1065,10 +1105,19 @@ export function HomeScreen() {
               return (
                 <ReminderRow
                   key={item.id}
+                  id={item.id}
                   title={item.title}
                   timeLabel={`${startLabel}${endLabel}`}
                   status={item.status}
+                  kind={item.kind}
+                  meetLink={item.action?.meetLink}
                   isNew={justCreatedIds.has(item.id)}
+                  onPress={() => {
+                    router.push({
+                      pathname: "/reminder/[id]",
+                      params: { id: item.id },
+                    });
+                  }}
                 />
               );
             })}
@@ -1363,11 +1412,38 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.sm,
   },
+  reminderTitleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  kindIcon: {
+    fontSize: 16,
+  },
   reminderTitle: {
     flex: 1,
     fontSize: 16,
     fontWeight: "600",
     color: "#0F172A",
+  },
+  badgeGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  meetPill: {
+    backgroundColor: "rgba(22, 163, 74, 0.12)",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(22, 163, 74, 0.3)",
+  },
+  meetPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#15803D",
   },
   newBadge: {
     fontSize: 12,
