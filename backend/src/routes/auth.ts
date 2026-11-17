@@ -21,6 +21,12 @@ function publicUser(user: {
   email: string;
   displayName?: string | null;
   timezone?: string | null;
+  defaultLeadTimes?: {
+    simple?: number[];
+    meeting?: number[];
+    call?: number[];
+    custom?: number[];
+  } | null;
   createdAt?: Date;
   updatedAt?: Date;
 }) {
@@ -29,6 +35,12 @@ function publicUser(user: {
     email: user.email,
     displayName: user.displayName ?? "",
     timezone: user.timezone ?? "UTC",
+    defaultLeadTimes: {
+      simple: user.defaultLeadTimes?.simple ?? [],
+      meeting: user.defaultLeadTimes?.meeting ?? [60, 15],
+      call: user.defaultLeadTimes?.call ?? [15],
+      custom: user.defaultLeadTimes?.custom ?? [],
+    },
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -103,9 +115,18 @@ authRouter.get("/me", requireAuth, async (req, res) => {
 });
 
 authRouter.patch("/me", requireAuth, async (req, res) => {
+  const leadTimesArraySchema = z.array(z.number().int().min(0));
   const patchSchema = z.object({
     timezone: z.string().trim().optional(),
     displayName: z.string().trim().optional(),
+    defaultLeadTimes: z
+      .object({
+        simple: leadTimesArraySchema.optional(),
+        meeting: leadTimesArraySchema.optional(),
+        call: leadTimesArraySchema.optional(),
+        custom: leadTimesArraySchema.optional(),
+      })
+      .optional(),
   });
 
   const parsed = patchSchema.safeParse(req.body);
@@ -123,6 +144,23 @@ authRouter.patch("/me", requireAuth, async (req, res) => {
   }
   if (parsed.data.displayName !== undefined) {
     user.displayName = parsed.data.displayName;
+  }
+  if (parsed.data.defaultLeadTimes) {
+    if (!user.defaultLeadTimes) {
+      user.defaultLeadTimes = { simple: [], meeting: [60, 15], call: [15], custom: [] };
+    }
+    if (parsed.data.defaultLeadTimes.simple !== undefined) {
+      user.defaultLeadTimes.simple = parsed.data.defaultLeadTimes.simple;
+    }
+    if (parsed.data.defaultLeadTimes.meeting !== undefined) {
+      user.defaultLeadTimes.meeting = parsed.data.defaultLeadTimes.meeting;
+    }
+    if (parsed.data.defaultLeadTimes.call !== undefined) {
+      user.defaultLeadTimes.call = parsed.data.defaultLeadTimes.call;
+    }
+    if (parsed.data.defaultLeadTimes.custom !== undefined) {
+      user.defaultLeadTimes.custom = parsed.data.defaultLeadTimes.custom;
+    }
   }
 
   await user.save();

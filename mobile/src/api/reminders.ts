@@ -12,6 +12,7 @@ export type ReminderSummary = {
   source: string;
   localNotificationId: string | null;
   kind?: "simple" | "meeting" | "call" | "custom";
+  leadTimes?: number[];
   action?: {
     type?: "meeting_link" | "email" | "call" | "none";
     status?: "pending" | "done" | "failed";
@@ -40,6 +41,7 @@ export type UpdateReminderInput = {
   timezone?: string;
   status?: ReminderStatus;
   kind?: "simple" | "meeting" | "call" | "custom";
+  leadTimes?: number[];
   action?: {
     type?: "meeting_link" | "email" | "call" | "none";
     status?: "pending" | "done" | "failed";

@@ -55,6 +55,16 @@ const STATUS_OPTIONS: ReminderStatus[] = [
   "cancelled",
 ];
 
+function formatLeadTime(mins: number): string {
+  if (mins < 60) return `${mins}m`;
+  if (mins === 60) return "1h";
+  if (mins % 1440 === 0) return `${mins / 1440}d`;
+  if (mins % 60 === 0) return `${mins / 60}h`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}h ${m}m`;
+}
+
 function getDeviceTimezone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -88,6 +98,7 @@ export function ReminderDetailScreen() {
   const [notes, setNotes] = useState("");
   const [status, setStatus] = useState<ReminderStatus>("scheduled");
   const [kind, setKind] = useState<ReminderKind>("simple");
+  const [leadTimes, setLeadTimes] = useState<number[]>([]);
   const [meetLink, setMeetLink] = useState("");
   const [attendees, setAttendees] = useState<
     Array<{ name?: string | null; email?: string | null; inviteSentAt?: string | null }>
@@ -118,6 +129,7 @@ export function ReminderDetailScreen() {
           : "scheduled") as ReminderStatus,
       );
       setKind(reminder.kind ?? "simple");
+      setLeadTimes(reminder.leadTimes ?? []);
       setMeetLink(reminder.action?.meetLink ?? "");
       setAttendees(reminder.action?.attendees ?? []);
       setStartLocal(toLocalDateTimeInput(reminder.startAt, tz));
@@ -143,6 +155,9 @@ export function ReminderDetailScreen() {
       applyReminderToForm(reminder);
       setLoad({ status: "ready", reminder });
     } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        void cancelReminderLocalNotification(id);
+      }
       const message =
         error instanceof ApiError
           ? error.message
@@ -199,6 +214,7 @@ export function ReminderDetailScreen() {
         notes: notes.trim(),
         status,
         kind,
+        leadTimes,
         action:
           meetLink.trim() || attendees.length > 0
             ? {
@@ -231,6 +247,22 @@ export function ReminderDetailScreen() {
       savingRef.current = false;
       setIsSaving(false);
     }
+  }
+
+  function addLeadTime(minutes: number) {
+    if (minutes <= 0) return;
+    setLeadTimes((prev) => {
+      const next = Array.from(new Set([...prev, minutes])).sort((a, b) => b - a);
+      return next;
+    });
+    setFormError(null);
+    setSaveMessage(null);
+  }
+
+  function removeLeadTime(minutes: number) {
+    setLeadTimes((prev) => prev.filter((m) => m !== minutes));
+    setFormError(null);
+    setSaveMessage(null);
   }
 
   function confirmDelete() {
@@ -548,6 +580,66 @@ export function ReminderDetailScreen() {
             </View>
 
             <View style={styles.card}>
+              <View style={styles.leadTimeHeader}>
+                <Text style={styles.fieldLabel}>Pre-Reminders (Lead Times)</Text>
+                <Text style={styles.leadTimeHint}>Early alerts before start time</Text>
+              </View>
+
+              {leadTimes.length > 0 ? (
+                <View style={styles.leadChipsWrap}>
+                  {leadTimes.map((mins) => (
+                    <View key={mins} style={styles.leadChip}>
+                      <Text style={styles.leadChipIcon}>🔔</Text>
+                      <Text style={styles.leadChipLabel}>{formatLeadTime(mins)} before</Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${formatLeadTime(mins)} alert`}
+                        disabled={isSaving || isDeleting}
+                        onPress={() => removeLeadTime(mins)}
+                        style={styles.leadChipRemove}
+                      >
+                        <Text style={styles.leadChipRemoveText}>✕</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.noLeadTimesText}>
+                  No pre-alerts set · notification fires only at scheduled time
+                </Text>
+              )}
+
+              <Text style={styles.quickAddLabel}>Quick Add:</Text>
+              <View style={styles.quickAddRow}>
+                {[5, 15, 30, 60, 120, 1440].map((mins) => {
+                  const alreadyAdded = leadTimes.includes(mins);
+                  return (
+                    <Pressable
+                      key={mins}
+                      accessibilityRole="button"
+                      disabled={isSaving || isDeleting || alreadyAdded}
+                      onPress={() => addLeadTime(mins)}
+                      style={({ pressed }) => [
+                        styles.quickAddChip,
+                        alreadyAdded ? styles.quickAddChipDisabled : null,
+                        pressed ? styles.pressed : null,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.quickAddChipText,
+                          alreadyAdded ? styles.quickAddChipTextDisabled : null,
+                        ]}
+                      >
+                        +{formatLeadTime(mins)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.card}>
               <Text style={styles.fieldLabel}>Status</Text>
               <View style={styles.statusRow}>
                 {STATUS_OPTIONS.map((option) => {
@@ -860,6 +952,85 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: spacing.sm,
+  },
+  leadTimeHeader: {
+    gap: 2,
+  },
+  leadTimeHint: {
+    fontSize: 12,
+    color: "#64748B",
+  },
+  leadChipsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs + 4,
+    marginTop: spacing.xs,
+  },
+  leadChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.25)",
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
+  },
+  leadChipIcon: {
+    fontSize: 13,
+  },
+  leadChipLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#1D4ED8",
+  },
+  leadChipRemove: {
+    paddingLeft: 4,
+    paddingVertical: 2,
+  },
+  leadChipRemoveText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  noLeadTimesText: {
+    fontSize: 13,
+    color: "#64748B",
+    fontStyle: "italic",
+    paddingVertical: spacing.xs,
+  },
+  quickAddLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    marginTop: spacing.xs + 2,
+  },
+  quickAddRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs + 4,
+  },
+  quickAddChip: {
+    backgroundColor: "rgba(241, 245, 249, 1)",
+    borderWidth: 1,
+    borderColor: "rgba(203, 213, 225, 0.8)",
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.md,
+  },
+  quickAddChipDisabled: {
+    opacity: 0.4,
+  },
+  quickAddChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  quickAddChipTextDisabled: {
+    color: "#94A3B8",
   },
   primaryButton: {
     backgroundColor: "#1D4ED8",

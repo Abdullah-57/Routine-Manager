@@ -8,30 +8,82 @@ const PERMISSION_ASKED_KEY = "notificationPermissionAsked.v1";
 const EXACT_ALARM_ASKED_KEY = "exactAlarmPermissionAsked.v1";
 export const REMINDERS_CHANNEL_ID = "reminders";
 
-type ReminderLike = {
+export type ReminderLike = {
   id: string;
   title: string;
   notes?: string | null;
   startAt: string;
   status: string;
+  kind?: string | null;
+  leadTimes?: number[] | null;
+  action?: {
+    meetLink?: string | null;
+  } | null;
 };
 
-type IdMap = Record<string, string>;
+type StoredSchedule = {
+  ids: string[];
+  signature?: string;
+};
 
-async function loadMap(): Promise<IdMap> {
+type StoredMap = Record<string, StoredSchedule>;
+
+async function loadMap(): Promise<StoredMap> {
   try {
     const raw = await AsyncStorage.getItem(MAP_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return {};
-    return parsed as IdMap;
+
+    const normalized: StoredMap = {};
+    for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+      if (val && typeof val === "object" && Array.isArray((val as any).ids)) {
+        normalized[key] = {
+          ids: (val as any).ids.filter((item: unknown): item is string => typeof item === "string"),
+          signature: typeof (val as any).signature === "string" ? (val as any).signature : undefined,
+        };
+      } else if (Array.isArray(val)) {
+        normalized[key] = {
+          ids: val.filter((item: unknown): item is string => typeof item === "string"),
+        };
+      } else if (typeof val === "string") {
+        normalized[key] = {
+          ids: [val],
+        };
+      }
+    }
+    return normalized;
   } catch {
     return {};
   }
 }
 
-async function saveMap(map: IdMap) {
+async function saveMap(map: StoredMap) {
   await AsyncStorage.setItem(MAP_KEY, JSON.stringify(map));
+}
+
+function reminderSignature(reminder: ReminderLike): string {
+  const leadStr = (reminder.leadTimes || [])
+    .slice()
+    .sort((a, b) => a - b)
+    .join(",");
+  return `${reminder.id}|${reminder.startAt}|${leadStr}|${reminder.status}|${reminder.title}`;
+}
+
+function formatLeadDuration(mins: number): string {
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"}`;
+  if (mins === 60) return "1 hour";
+  if (mins % 1440 === 0) {
+    const days = mins / 1440;
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }
+  if (mins % 60 === 0) {
+    const hours = mins / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}h ${m}m`;
 }
 
 /**
@@ -135,20 +187,47 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 }
 
-export async function cancelReminderLocalNotification(reminderId: string) {
+let schedulingLock = Promise.resolve();
+
+function withSchedulingLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = schedulingLock.then(fn, fn);
+  schedulingLock = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+async function cancelReminderLocalNotificationInternal(reminderId: string) {
   if (Platform.OS === "web") return;
 
   try {
     const map = await loadMap();
     const existing = map[reminderId];
-    if (existing) {
-      try {
-        await Notifications.cancelScheduledNotificationAsync(existing);
-      } catch {
-        // Already fired or missing — ignore
+    if (existing && existing.ids.length > 0) {
+      for (const notifId of existing.ids) {
+        try {
+          await Notifications.cancelScheduledNotificationAsync(notifId);
+        } catch {
+          // Already fired or missing — ignore
+        }
       }
       delete map[reminderId];
       await saveMap(map);
+    }
+
+    // Safety net: inspect OS-level scheduled notifications for this reminderId
+    // to guarantee no zombie or duplicate notifications survive in the OS alarm manager.
+    const allScheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const notif of allScheduled) {
+      const data = notif.content?.data as Record<string, unknown> | undefined;
+      if (data && data.reminderId === reminderId) {
+        try {
+          await Notifications.cancelScheduledNotificationAsync(notif.identifier);
+        } catch {
+          // Ignore
+        }
+      }
     }
   } catch (error) {
     if (__DEV__) {
@@ -157,33 +236,41 @@ export async function cancelReminderLocalNotification(reminderId: string) {
   }
 }
 
+export async function cancelReminderLocalNotification(reminderId: string) {
+  return withSchedulingLock(() => cancelReminderLocalNotificationInternal(reminderId));
+}
+
 /**
- * Schedule (or replace) a one-shot local notification at reminder.startAt.
- * Skips past times and non-scheduled statuses.
+ * Schedule N+1 local notifications per reminder:
+ * 1) Pre-reminder alerts for each configured lead time (e.g. 5m, 15m, 60m before startAt)
+ * 2) Main reminder alert at startAt
+ *
+ * All notifications include deep links and `reminderId` so tapping any of them
+ * immediately routes to the Edit Reminder screen.
  */
-export async function scheduleReminderLocalNotification(
+async function scheduleReminderLocalNotificationInternal(
   reminder: ReminderLike,
-): Promise<string | null> {
-  if (Platform.OS === "web") return null;
+): Promise<string[]> {
+  if (Platform.OS === "web") return [];
 
   try {
-    await cancelReminderLocalNotification(reminder.id);
+    await cancelReminderLocalNotificationInternal(reminder.id);
 
     if (reminder.status !== "scheduled") {
-      return null;
+      return [];
     }
 
     const when = new Date(reminder.startAt);
-    const msUntil = when.getTime() - Date.now();
-    if (Number.isNaN(when.getTime()) || msUntil <= 1500) {
+    const startMs = when.getTime();
+    if (Number.isNaN(startMs)) {
       if (__DEV__) {
         console.warn(
-          "Skipping local notification (past or invalid startAt):",
+          "Skipping local notification (invalid startAt):",
           reminder.id,
           reminder.startAt,
         );
       }
-      return null;
+      return [];
     }
 
     const allowed = await requestNotificationPermission();
@@ -194,72 +281,173 @@ export async function scheduleReminderLocalNotification(
           reminder.id,
         );
       }
-      return null;
+      return [];
     }
 
     await ensureAndroidRemindersChannel();
 
-    // Deep link so taps can reopen the app into this reminder.
+    // Deep link so taps reopen the app into this reminder edit page.
     const path = `reminder/${reminder.id}`;
     const deepLink = Linking.createURL(path);
-
-    // Near-term: TIME_INTERVAL is often more reliable than DATE on Android.
-    // Longer-term: DATE + alarmClock for wall-clock delivery.
-    const useInterval = msUntil <= 60 * 60 * 1000; // within 1 hour
     const androidChannel =
       Platform.OS === "android" ? { channelId: REMINDERS_CHANNEL_ID } : {};
 
-    const identifier = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: reminder.title || "Reminder",
-        body: reminder.notes?.trim()
-          ? reminder.notes.trim()
-          : "It's time for this routine item.",
-        data: {
-          reminderId: reminder.id,
-          screen: "reminder",
-          url: `/reminder/${reminder.id}`,
-          deepLink,
-        },
-        sound: true,
-        ...androidChannel,
-      },
-      trigger: useInterval
-        ? {
-            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-            seconds: Math.max(2, Math.ceil(msUntil / 1000)),
-            ...androidChannel,
-          }
-        : {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: when,
-            delivery: "alarmClock",
-            ...androidChannel,
-          },
-    });
+    const scheduledIds: string[] = [];
+    const now = Date.now();
 
-    if (__DEV__) {
-      console.log(
-        "Scheduled local notification",
-        identifier,
-        "for",
-        reminder.id,
-        "at",
-        when.toISOString(),
-        useInterval ? `(in ${Math.ceil(msUntil / 1000)}s)` : "(date)",
-      );
+    // 1. Schedule Pre-Reminders (Lead Times)
+    const leadTimes = Array.from(
+      new Set(
+        (reminder.leadTimes || []).filter(
+          (m): m is number => typeof m === "number" && m > 0,
+        ),
+      ),
+    ).sort((a, b) => b - a);
+
+    for (const mins of leadTimes) {
+      const preWhen = new Date(startMs - mins * 60 * 1000);
+      const msUntilPre = preWhen.getTime() - now;
+
+      // Skip pre-alerts that are already in the past
+      if (msUntilPre <= 1500) {
+        continue;
+      }
+
+      const durationText = formatLeadDuration(mins);
+      let preBody = `Heads-up: ${reminder.title || "Reminder"} starts in ${durationText}.`;
+      if (reminder.notes?.trim()) {
+        preBody += `\n${reminder.notes.trim()}`;
+      }
+
+      const useIntervalPre = msUntilPre <= 60 * 60 * 1000;
+      const preIdentifier = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: reminder.title || "Reminder",
+          subtitle: `Heads-up · In ${durationText}`,
+          body: preBody,
+          data: {
+            reminderId: reminder.id,
+            screen: "reminder",
+            url: `/reminder/${reminder.id}`,
+            deepLink,
+            isPreAlert: true,
+            leadTimeMinutes: mins,
+            meetLink: reminder.action?.meetLink ?? null,
+          },
+          sound: true,
+          ...androidChannel,
+        },
+        trigger: useIntervalPre
+          ? {
+              type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+              seconds: Math.max(2, Math.ceil(msUntilPre / 1000)),
+              repeats: false,
+              ...androidChannel,
+            }
+          : {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: preWhen,
+              delivery: "alarmClock",
+              ...androidChannel,
+            },
+      });
+
+      scheduledIds.push(preIdentifier);
+
+      if (__DEV__) {
+        console.log(
+          "Scheduled pre-alert notification",
+          preIdentifier,
+          `(-${mins}m)`,
+          "for",
+          reminder.id,
+          "at",
+          preWhen.toISOString(),
+          useIntervalPre ? `(in ${Math.ceil(msUntilPre / 1000)}s)` : "(date)",
+        );
+      }
     }
 
-    const map = await loadMap();
-    map[reminder.id] = identifier;
-    await saveMap(map);
-    return identifier;
+    // 2. Schedule Main Event Notification at startAt
+    const msUntilMain = startMs - now;
+    if (msUntilMain > 1500) {
+      const mainBody = reminder.notes?.trim()
+        ? reminder.notes.trim()
+        : reminder.kind === "meeting"
+          ? "Your meeting is starting now."
+          : reminder.kind === "call"
+            ? "Your call is starting now."
+            : "It's time for this routine item.";
+
+      const useIntervalMain = msUntilMain <= 60 * 60 * 1000;
+      const mainIdentifier = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: reminder.title || "Reminder",
+          subtitle: reminder.kind === "meeting" ? "Meeting · Starts Now" : "Starts Now",
+          body: mainBody,
+          data: {
+            reminderId: reminder.id,
+            screen: "reminder",
+            url: `/reminder/${reminder.id}`,
+            deepLink,
+            isPreAlert: false,
+            meetLink: reminder.action?.meetLink ?? null,
+          },
+          sound: true,
+          ...androidChannel,
+        },
+        trigger: useIntervalMain
+          ? {
+              type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+              seconds: Math.max(2, Math.ceil(msUntilMain / 1000)),
+              repeats: false,
+              ...androidChannel,
+            }
+          : {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: when,
+              delivery: "alarmClock",
+              ...androidChannel,
+            },
+      });
+
+      scheduledIds.push(mainIdentifier);
+
+      if (__DEV__) {
+        console.log(
+          "Scheduled main notification",
+          mainIdentifier,
+          "for",
+          reminder.id,
+          "at",
+          when.toISOString(),
+          useIntervalMain ? `(in ${Math.ceil(msUntilMain / 1000)}s)` : "(date)",
+        );
+      }
+    }
+
+    if (scheduledIds.length > 0) {
+      const map = await loadMap();
+      map[reminder.id] = {
+        ids: scheduledIds,
+        signature: reminderSignature(reminder),
+      };
+      await saveMap(map);
+    }
+
+    return scheduledIds;
   } catch (error) {
     if (__DEV__) {
       console.warn("scheduleReminderLocalNotification failed:", error);
     }
-    return null;
+    return [];
   }
+}
+
+export async function scheduleReminderLocalNotification(
+  reminder: ReminderLike,
+): Promise<string[]> {
+  return withSchedulingLock(() => scheduleReminderLocalNotificationInternal(reminder));
 }
 
 /** Cancel + reschedule after an edit. */
@@ -271,18 +459,17 @@ export async function rescheduleReminderLocalNotification(
 
 /**
  * Keep local schedules aligned with the server list without thrashing:
- * - cancel orphans / past / non-scheduled
- * - schedule missing future scheduled reminders
+ * - cancel orphans / past / non-scheduled (from both map AND device OS alarm manager)
+ * - schedule or update missing / changed reminders
  */
-export async function syncLocalNotificationsForReminders(
+async function syncLocalNotificationsForRemindersInternal(
   reminders: ReminderLike[],
 ) {
   if (Platform.OS === "web") return;
 
   try {
-    const map = await loadMap();
     const now = Date.now() + 1500;
-    const keep = new Set<string>();
+    const activeScheduledReminderIds = new Set<string>();
 
     for (const reminder of reminders) {
       const startMs = new Date(reminder.startAt).getTime();
@@ -290,24 +477,59 @@ export async function syncLocalNotificationsForReminders(
         reminder.status === "scheduled" &&
         Number.isFinite(startMs) &&
         startMs > now;
-      if (eligible) keep.add(reminder.id);
+      if (eligible) activeScheduledReminderIds.add(reminder.id);
     }
 
-    for (const reminderId of Object.keys(map)) {
-      if (!keep.has(reminderId)) {
-        await cancelReminderLocalNotification(reminderId);
+    // 1. HARD CLEANUP: Inspect all actual notifications currently scheduled in the OS!
+    // Cancel any notification whose reminder is deleted, cancelled, completed, or no longer eligible.
+    const allScheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const notif of allScheduled) {
+      const data = notif.content?.data as Record<string, unknown> | undefined;
+      if (data && typeof data.reminderId === "string") {
+        if (!activeScheduledReminderIds.has(data.reminderId)) {
+          try {
+            await Notifications.cancelScheduledNotificationAsync(notif.identifier);
+            if (__DEV__) {
+              console.log("Cancelled orphan OS notification", notif.identifier, "for deleted reminder", data.reminderId);
+            }
+          } catch {
+            // Ignore
+          }
+        }
       }
     }
 
+    // 2. Clean up AsyncStorage map for reminders no longer eligible
+    const map = await loadMap();
+    for (const reminderId of Object.keys(map)) {
+      if (!activeScheduledReminderIds.has(reminderId)) {
+        await cancelReminderLocalNotificationInternal(reminderId);
+      }
+    }
+
+    // 3. Re-check remaining and ensure fresh notifications match current signature
     const freshMap = await loadMap();
     for (const reminder of reminders) {
-      if (!keep.has(reminder.id)) continue;
-      if (freshMap[reminder.id]) continue;
-      await scheduleReminderLocalNotification(reminder);
+      if (!activeScheduledReminderIds.has(reminder.id)) continue;
+
+      const existing = freshMap[reminder.id];
+      const sig = reminderSignature(reminder);
+
+      if (existing && existing.ids.length > 0 && existing.signature === sig) {
+        continue;
+      }
+
+      await scheduleReminderLocalNotificationInternal(reminder);
     }
   } catch (error) {
     if (__DEV__) {
       console.warn("syncLocalNotificationsForReminders failed:", error);
     }
   }
+}
+
+export async function syncLocalNotificationsForReminders(
+  reminders: ReminderLike[],
+) {
+  return withSchedulingLock(() => syncLocalNotificationsForRemindersInternal(reminders));
 }

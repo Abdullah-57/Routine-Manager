@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { Reminder } from "../models/Reminder";
+import { User } from "../models/User";
 
 export type ReminderDto = {
   id: string;
@@ -13,6 +14,7 @@ export type ReminderDto = {
   source: string;
   localNotificationId: string | null;
   kind?: string | null;
+  leadTimes?: number[];
   action?: {
     type?: string | null;
     status?: string | null;
@@ -35,6 +37,7 @@ export function toReminderDto(reminder: {
   source: string;
   localNotificationId?: string | null;
   kind?: string | null;
+  leadTimes?: number[] | null;
   action?: {
     type?: string | null;
     status?: string | null;
@@ -56,6 +59,7 @@ export function toReminderDto(reminder: {
     source: reminder.source,
     localNotificationId: reminder.localNotificationId ?? null,
     kind: reminder.kind ?? "simple",
+    leadTimes: reminder.leadTimes ?? [],
     action: reminder.action
       ? {
           type: reminder.action.type ?? "none",
@@ -145,6 +149,7 @@ export async function createRemindersForUser(
     startAtISO: string;
     endAtISO?: string;
     kind?: "simple" | "meeting" | "call" | "custom";
+    leadTimes?: number[];
     meetLink?: string;
     attendees?: Array<{ name?: string; email?: string }>;
   }>,
@@ -152,6 +157,14 @@ export async function createRemindersForUser(
   created: ReminderDto[];
   skippedDuplicates: Array<{ title: string; startAtISO: string }>;
 }> {
+  const user = await User.findById(userId).select("defaultLeadTimes");
+  const userDefaults: Record<string, number[]> = (user?.defaultLeadTimes as any) ?? {
+    simple: [],
+    meeting: [60, 15],
+    call: [15],
+    custom: [],
+  };
+
   const now = new Date();
   const prepared = items.map((item) => {
     let startAt = parseDate(item.startAtISO);
@@ -176,6 +189,10 @@ export async function createRemindersForUser(
 
     const hasMeetLink = Boolean(item.meetLink);
     const kind = item.kind || (hasMeetLink ? "meeting" : "simple");
+    const leadTimes = item.leadTimes !== undefined
+      ? item.leadTimes
+      : (userDefaults[kind] ?? (kind === "meeting" ? [60, 15] : kind === "call" ? [15] : []));
+
     const action = hasMeetLink || (item.attendees && item.attendees.length > 0)
       ? {
           type: (hasMeetLink ? "meeting_link" : "email") as "meeting_link" | "email",
@@ -197,6 +214,7 @@ export async function createRemindersForUser(
       endAt,
       timezone,
       kind,
+      leadTimes,
       action,
       status: "scheduled" as const,
       source: "ai" as const,
@@ -276,6 +294,7 @@ export async function updateReminderForUser(
     endAtISO?: string | null;
     status?: "scheduled" | "completed" | "cancelled";
     kind?: "simple" | "meeting" | "call" | "custom";
+    leadTimes?: number[];
     meetLink?: string;
     attendees?: Array<{ name?: string; email?: string }>;
   },
@@ -297,6 +316,7 @@ export async function updateReminderForUser(
   if (input.title !== undefined) reminder.title = input.title.trim();
   if (input.notes !== undefined) reminder.notes = input.notes.trim();
   if (input.kind !== undefined) reminder.kind = input.kind;
+  if (input.leadTimes !== undefined) reminder.leadTimes = input.leadTimes;
 
   if (input.meetLink !== undefined || input.attendees !== undefined) {
     (reminder as any).action = {

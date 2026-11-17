@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 import { findContact } from "./contacts";
 import { sendEmailMessage } from "./email";
 import { generateMeetingLink } from "./meetingLinks";
+import { User } from "../models/User";
 import {
   createRemindersForUser,
   deleteReminderForUser,
@@ -20,6 +21,7 @@ export type ToolAffectSummary = {
   created: ReminderDto[];
   updated: ReminderDto[];
   deleted: Array<{ id: string }>;
+  defaultLeadTimesUpdated: Array<{ kind: string; leadTimes: number[] }>;
 };
 
 export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
@@ -48,6 +50,11 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
                   type: "string",
                   enum: ["simple", "meeting", "call", "custom"],
                   description: "Kind of reminder. Use 'meeting' when scheduling meetings.",
+                },
+                leadTimes: {
+                  type: "array",
+                  items: { type: "integer", minimum: 0 },
+                  description: "Pre-alert lead times in minutes before startAt, e.g. [60, 15] for 1h and 15m before, [30] for 30m before, or [] for no pre-alert. If omitted, default lead times for this kind are automatically assigned.",
                 },
                 meetLink: {
                   type: "string",
@@ -95,6 +102,11 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
           kind: {
             type: "string",
             enum: ["simple", "meeting", "call", "custom"],
+          },
+          leadTimes: {
+            type: "array",
+            items: { type: "integer", minimum: 0 },
+            description: "Updated pre-alert lead times in minutes before startAt (e.g. [30] or [60, 15] or []).",
           },
           meetLink: {
             type: "string",
@@ -211,6 +223,31 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "set_default_lead_times",
+      description:
+        "Update the user's default pre-alert lead times in minutes for a specific reminder kind ('simple', 'meeting', 'call', 'custom'). Call this when the user requests general pre-alert preferences, e.g. 'give me a heads-up 30 minutes before every meeting', 'remind me 10 minutes before calls', 'no alerts before simple reminders'.",
+      parameters: {
+        type: "object",
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["simple", "meeting", "call", "custom"],
+            description: "The reminder category to update default lead times for.",
+          },
+          leadTimes: {
+            type: "array",
+            items: { type: "integer", minimum: 0 },
+            description: "Array of minutes before startAt (e.g. [30] for 30m, [60, 15] for 1h & 15m, [] for none).",
+          },
+        },
+        required: ["kind", "leadTimes"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 type ToolContext = {
@@ -227,6 +264,7 @@ async function executeCreateReminders(args: unknown, ctx: ToolContext) {
       startAtISO: string;
       endAtISO?: string;
       kind?: "simple" | "meeting" | "call" | "custom";
+      leadTimes?: number[];
       meetLink?: string;
       attendees?: Array<{ name?: string; email?: string }>;
     }>;
@@ -257,6 +295,7 @@ async function executeUpdateReminder(args: unknown, ctx: ToolContext) {
     endAtISO?: string | null;
     status?: "scheduled" | "completed" | "cancelled";
     kind?: "simple" | "meeting" | "call" | "custom";
+    leadTimes?: number[];
     meetLink?: string;
     attendees?: Array<{ name?: string; email?: string }>;
   };
@@ -296,6 +335,41 @@ async function executeCreateMeetingLink(args: unknown, ctx: ToolContext) {
 async function executeSendEmail(args: unknown, ctx: ToolContext) {
   const payload = args as { to: string; subject: string; body: string };
   return sendEmailMessage(ctx.userId, payload.to, payload.subject, payload.body);
+}
+
+async function executeSetDefaultLeadTimes(args: unknown, ctx: ToolContext) {
+  const payload = args as {
+    kind: "simple" | "meeting" | "call" | "custom";
+    leadTimes: number[];
+  };
+
+  const user = await User.findById(ctx.userId);
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  if (!user.defaultLeadTimes) {
+    user.defaultLeadTimes = { simple: [], meeting: [60, 15], call: [15], custom: [] };
+  }
+
+  const sorted = Array.from(
+    new Set((payload.leadTimes || []).map((n) => Math.max(0, Math.floor(n)))),
+  ).sort((a, b) => b - a);
+
+  (user.defaultLeadTimes as any)[payload.kind] = sorted;
+  await user.save();
+
+  ctx.affect.defaultLeadTimesUpdated.push({
+    kind: payload.kind,
+    leadTimes: sorted,
+  });
+
+  return {
+    success: true,
+    kind: payload.kind,
+    leadTimes: sorted,
+    message: `Default lead times for ${payload.kind} set to ${sorted.length > 0 ? sorted.map((m) => `${m}m`).join(", ") : "none"}.`,
+  };
 }
 
 export async function executeToolCall(
@@ -343,6 +417,9 @@ export async function executeToolCall(
         break;
       case "send_email":
         result = await executeSendEmail(parsedArgs, ctx);
+        break;
+      case "set_default_lead_times":
+        result = await executeSetDefaultLeadTimes(parsedArgs, ctx);
         break;
       default:
         result = { error: `Unknown tool: ${name}` };

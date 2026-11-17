@@ -1,10 +1,18 @@
 import { apiFetch } from "@/api/client";
 
+export type DefaultLeadTimes = {
+  simple: number[];
+  meeting: number[];
+  call: number[];
+  custom: number[];
+};
+
 export type AuthUser = {
   id: string;
   email: string;
   displayName: string;
   timezone: string;
+  defaultLeadTimes?: DefaultLeadTimes;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -39,4 +47,19 @@ export function login(input: { email: string; password: string }) {
 
 export function fetchMe(token: string) {
   return apiFetch<MeResponse>("/auth/me", { token });
+}
+
+export function updateMe(
+  token: string,
+  input: {
+    displayName?: string;
+    timezone?: string;
+    defaultLeadTimes?: Partial<DefaultLeadTimes>;
+  },
+) {
+  return apiFetch<MeResponse>("/auth/me", {
+    method: "PATCH",
+    token,
+    body: input,
+  });
 }

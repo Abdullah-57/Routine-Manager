@@ -28,6 +28,8 @@ type AuthContextValue = {
     timezone?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+  updateCurrentUser: (user: AuthUser) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -125,6 +127,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    if (!token) return;
+    try {
+      const { user: me } = await fetchMe(token);
+      setUser(me);
+    } catch (error) {
+      if (__DEV__) {
+        console.warn("Failed to refresh user:", error);
+      }
+    }
+  }, [token]);
+
+  const updateCurrentUser = useCallback((updated: AuthUser) => {
+    setUser(updated);
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
@@ -133,8 +151,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       signup,
       logout,
+      refreshUser,
+      updateCurrentUser,
     }),
-    [user, token, isHydrated, login, signup, logout],
+    [user, token, isHydrated, login, signup, logout, refreshUser, updateCurrentUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

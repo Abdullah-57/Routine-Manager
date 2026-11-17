@@ -3,6 +3,7 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { Reminder } from "../models/Reminder";
+import { User } from "../models/User";
 import { startDateAndTimeInTimezone } from "../services/reminders";
 
 const statusEnum = z.enum(["scheduled", "completed", "cancelled"]);
@@ -34,6 +35,7 @@ const createReminderSchema = z.object({
   source: sourceEnum.optional(),
   localNotificationId: z.string().trim().optional(),
   kind: kindEnum.optional(),
+  leadTimes: z.array(z.number().int().min(0)).optional(),
   action: actionSchema.optional(),
 });
 
@@ -48,6 +50,7 @@ const updateReminderSchema = z
     source: sourceEnum.optional(),
     localNotificationId: z.string().trim().nullable().optional(),
     kind: kindEnum.optional(),
+    leadTimes: z.array(z.number().int().min(0)).optional(),
     action: actionSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
@@ -77,6 +80,7 @@ function publicReminder(reminder: {
   source: string;
   localNotificationId?: string | null;
   kind?: string | null;
+  leadTimes?: number[] | null;
   action?: {
     type?: string | null;
     status?: string | null;
@@ -98,6 +102,7 @@ function publicReminder(reminder: {
     source: reminder.source,
     localNotificationId: reminder.localNotificationId ?? null,
     kind: reminder.kind ?? "simple",
+    leadTimes: reminder.leadTimes ?? [],
     action: reminder.action
       ? {
           type: reminder.action.type ?? "none",
@@ -187,6 +192,19 @@ remindersRouter.post("/", async (req, res) => {
     return res.status(400).json({ error: "endAt must be after startAt" });
   }
 
+  const kind = data.kind ?? "simple";
+  let leadTimes = data.leadTimes;
+  if (leadTimes === undefined) {
+    const user = await User.findById(req.user!.id).select("defaultLeadTimes");
+    const userDefaults: Record<string, number[]> = (user?.defaultLeadTimes as any) ?? {
+      simple: [],
+      meeting: [60, 15],
+      call: [15],
+      custom: [],
+    };
+    leadTimes = userDefaults[kind] ?? (kind === "meeting" ? [60, 15] : kind === "call" ? [15] : []);
+  }
+
   const reminder = await Reminder.create({
     userId: req.user!.id,
     title: data.title,
@@ -197,7 +215,8 @@ remindersRouter.post("/", async (req, res) => {
     status: data.status ?? "scheduled",
     source: data.source ?? "manual",
     localNotificationId: data.localNotificationId,
-    kind: data.kind ?? "simple",
+    kind,
+    leadTimes,
     action: data.action
       ? {
           type: data.action.type ?? "none",
@@ -242,6 +261,7 @@ remindersRouter.patch("/:id", async (req, res) => {
   if (data.status !== undefined) reminder.status = data.status;
   if (data.source !== undefined) reminder.source = data.source;
   if (data.kind !== undefined) reminder.kind = data.kind;
+  if (data.leadTimes !== undefined) reminder.leadTimes = data.leadTimes;
   if (data.action !== undefined) {
     (reminder as any).action = data.action
       ? {

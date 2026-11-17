@@ -49,6 +49,10 @@ const reminderSchema = new Schema(
       enum: ["simple", "meeting", "call", "custom"],
       default: "simple",
     },
+    leadTimes: {
+      type: [Number],
+      default: [],
+    },
     action: {
       type: {
         type: String,

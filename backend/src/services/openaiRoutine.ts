@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import OpenAI from "openai";
 import { AiSession } from "../models/AiSession";
+import { User } from "../models/User";
 import { listRemindersForUser, startDateAndTimeInTimezone } from "./reminders";
 import {
   executeToolCall,
@@ -79,7 +80,16 @@ function formatLocalDateTimeParts(date: Date, timezone: string) {
   };
 }
 
-function buildSystemPrompt(timezone: string, now: Date) {
+function buildSystemPrompt(
+  timezone: string,
+  now: Date,
+  defaultLeadTimes?: {
+    simple?: number[];
+    meeting?: number[];
+    call?: number[];
+    custom?: number[];
+  },
+) {
   const today = formatDateKeyInTimezone(now, timezone);
   const tomorrow = formatDateKeyInTimezone(
     new Date(now.getTime() + 24 * 60 * 60 * 1000),
@@ -101,6 +111,11 @@ function buildSystemPrompt(timezone: string, now: Date) {
     hour: "numeric",
     minute: "2-digit",
   }).format(now);
+
+  const meetingDefaults = defaultLeadTimes?.meeting ?? [60, 15];
+  const callDefaults = defaultLeadTimes?.call ?? [15];
+  const simpleDefaults = defaultLeadTimes?.simple ?? [];
+  const customDefaults = defaultLeadTimes?.custom ?? [];
 
   return [
     "You are a routine planning assistant that both creates and manages reminders.",
@@ -151,6 +166,22 @@ function buildSystemPrompt(timezone: string, now: Date) {
     "     4. Call create_reminders with kind='meeting', title='Meeting with Alex', startAtISO, meetLink, and attendees: [{ name: 'Alex', email: contact.email }]. Include the meeting link in the reminder notes.",
     "     5. If find_contact returned ambiguous contacts, still generate the meeting link, schedule the reminder, and ask the user to clarify which person to invite.",
     "     6. If no contact is found, still generate the meeting link, schedule the reminder with kind='meeting', and inform the user.",
+    "",
+    "I) SMART PRE-REMINDERS & LEAD TIMES (FOLLOW STRICTLY):",
+    "   - Lead times represent alert minutes prior to startAt (e.g. [60, 15] means alerts 60m and 15m before).",
+    `   - User default lead times:`,
+    `     * meeting: [${meetingDefaults.join(", ")}] minutes before`,
+    `     * call: [${callDefaults.join(", ")}] minutes before`,
+    `     * simple: [${simpleDefaults.join(", ")}] (fires at event start time)`,
+    `     * custom: [${customDefaults.join(", ")}]`,
+    "   - When creating reminders (create_reminders):",
+    "     * If user explicitly asks for a heads-up or pre-alert (e.g. 'remind me 15 minutes before', 'give me a 30m heads-up', 'alert me 1 hour and 15 minutes ahead'): pass those exact minutes in leadTimes: [15] (or [30], [60, 15]).",
+    "     * If user explicitly says 'no pre-alert', 'no heads-up', or 'don't remind me early': pass leadTimes: [].",
+    "     * If user does NOT mention pre-alerts: omit leadTimes so default lead times for that kind apply automatically.",
+    "   - When user sets default pre-alerts (set_default_lead_times):",
+    "     * If user says 'give me a heads-up 30 minutes before every meeting', 'set default meeting alert to 30m', 'remind me 10 minutes before calls by default': call set_default_lead_times with kind and leadTimes.",
+    "   - When user updates pre-alerts on an existing reminder (update_reminder):",
+    "     * If user says 'give me a 20 minute heads-up for that meeting', 'change the pre-alert to 45 minutes': call update_reminder with reminderId and leadTimes: [20].",
     "",
     `User timezone: ${timezone}`,
     `Current UTC offset for that timezone: ${offset}`,
@@ -209,6 +240,18 @@ function buildFactualAssistantMessage(
   now: Date,
 ): string {
   const parts: string[] = [];
+
+  if (affect.defaultLeadTimesUpdated && affect.defaultLeadTimesUpdated.length > 0) {
+    for (const update of affect.defaultLeadTimesUpdated) {
+      const timesStr =
+        update.leadTimes.length > 0
+          ? update.leadTimes.map((m) => `${m} minutes`).join(" and ")
+          : "no pre-alerts";
+      parts.push(
+        `I've set your default pre-alerts for ${update.kind} reminders to ${timesStr} before.`,
+      );
+    }
+  }
 
   if (affect.created.length > 0) {
     if (affect.created.length === 1) {
@@ -273,7 +316,8 @@ async function buildExistingRemindersContext(
     }
     const lines = upcoming.map((item) => {
       const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
-      return `- id=${item.id} | ${item.title} | ${when} | status=${item.status}`;
+      const leadStr = item.leadTimes && item.leadTimes.length > 0 ? ` | leadTimes=[${item.leadTimes.join(",")}]` : "";
+      return `- id=${item.id} | ${item.title} | ${when}${leadStr} | status=${item.status}`;
     });
     return `Existing upcoming reminders (use these ids for update/delete):\n${lines.join("\n")}`;
   } catch {
@@ -351,7 +395,15 @@ export async function parseRoutineWithTools(
     ].join("\n");
   }
 
-  const systemPromptContent = `${buildSystemPrompt(input.timezone, now)}\n\n${existingContext}${multiTurnSessionContext}`;
+  const user = await User.findById(input.userId).select("defaultLeadTimes");
+  const defaultLeadTimes = (user?.defaultLeadTimes as any) ?? {
+    simple: [],
+    meeting: [60, 15],
+    call: [15],
+    custom: [],
+  };
+
+  const systemPromptContent = `${buildSystemPrompt(input.timezone, now, defaultLeadTimes)}\n\n${existingContext}${multiTurnSessionContext}`;
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     {
@@ -366,6 +418,7 @@ export async function parseRoutineWithTools(
     created: [],
     updated: [],
     deleted: [],
+    defaultLeadTimesUpdated: [],
   };
   const toolCalls: ToolExecutionRecord[] = [];
 

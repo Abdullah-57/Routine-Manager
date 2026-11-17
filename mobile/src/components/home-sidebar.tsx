@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/auth/AuthContext";
+import { updateMe, type DefaultLeadTimes } from "@/api/auth";
 import { getGoogleStatus, type GoogleStatusResponse } from "@/api/integrations";
 import Animated, {
   Easing,
@@ -100,8 +101,49 @@ export function HomeSidebar({
   const insets = useSafeAreaInsets();
   const progress = useSharedValue(0);
   const router = useRouter();
-  const { token } = useAuth();
+  const { token, user, updateCurrentUser } = useAuth();
   const [googleStatus, setGoogleStatus] = useState<GoogleStatusResponse | null>(null);
+
+  const userDefaults: DefaultLeadTimes = user?.defaultLeadTimes ?? {
+    meeting: [60, 15],
+    call: [15],
+    simple: [],
+    custom: [],
+  };
+
+  function formatLead(m: number): string {
+    if (m < 60) return `${m}m`;
+    if (m === 60) return "1h";
+    if (m % 1440 === 0) return `${m / 1440}d`;
+    if (m % 60 === 0) return `${m / 60}h`;
+    return `${m}m`;
+  }
+
+  async function handleToggleLeadTime(
+    kind: "meeting" | "call" | "simple",
+    minutes: number,
+  ) {
+    if (!token) return;
+    const current = userDefaults[kind] ?? [];
+    let next: number[];
+    if (current.includes(minutes)) {
+      next = current.filter((m) => m !== minutes);
+    } else {
+      next = Array.from(new Set([...current, minutes])).sort((a, b) => b - a);
+    }
+    const updatedDefaults: DefaultLeadTimes = {
+      ...userDefaults,
+      [kind]: next,
+    };
+    try {
+      const res = await updateMe(token, { defaultLeadTimes: updatedDefaults });
+      updateCurrentUser(res.user);
+    } catch (err) {
+      if (__DEV__) {
+        console.warn("Failed to update default lead times:", err);
+      }
+    }
+  }
 
   useEffect(() => {
     if (visible && token) {
@@ -330,6 +372,136 @@ export function HomeSidebar({
                   <Text style={styles.contactsPillText}>Open ›</Text>
                 </View>
               </Pressable>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.leadTimesBlock}>
+              <Text style={styles.sectionLabel}>Default Pre-Alerts</Text>
+              <Text style={styles.leadTimesSubtext}>
+                Early alert lead times automatically applied when scheduling reminders.
+              </Text>
+
+              {/* Meetings */}
+              <View style={styles.leadCategoryCard}>
+                <View style={styles.leadCategoryHeader}>
+                  <Text style={styles.leadCategoryTitle}>🎥 Meetings</Text>
+                  <Text style={styles.leadCategoryCurrent}>
+                    {userDefaults.meeting.length > 0
+                      ? userDefaults.meeting.map(formatLead).join(", ") + " before"
+                      : "None"}
+                  </Text>
+                </View>
+                <View style={styles.leadChipsRow}>
+                  {[15, 30, 60, 120].map((mins) => {
+                    const active = userDefaults.meeting.includes(mins);
+                    return (
+                      <Pressable
+                        key={mins}
+                        accessibilityRole="button"
+                        onPress={() => void handleToggleLeadTime("meeting", mins)}
+                        style={({ pressed }) => [
+                          styles.leadToggleChip,
+                          active && styles.leadToggleChipActive,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.leadToggleChipText,
+                            active && styles.leadToggleChipTextActive,
+                          ]}
+                        >
+                          {active ? "✓ " : "+"}{formatLead(mins)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Calls */}
+              <View style={styles.leadCategoryCard}>
+                <View style={styles.leadCategoryHeader}>
+                  <Text style={styles.leadCategoryTitle}>📞 Calls</Text>
+                  <Text style={styles.leadCategoryCurrent}>
+                    {userDefaults.call.length > 0
+                      ? userDefaults.call.map(formatLead).join(", ") + " before"
+                      : "None"}
+                  </Text>
+                </View>
+                <View style={styles.leadChipsRow}>
+                  {[5, 10, 15, 30].map((mins) => {
+                    const active = userDefaults.call.includes(mins);
+                    return (
+                      <Pressable
+                        key={mins}
+                        accessibilityRole="button"
+                        onPress={() => void handleToggleLeadTime("call", mins)}
+                        style={({ pressed }) => [
+                          styles.leadToggleChip,
+                          active && styles.leadToggleChipActive,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.leadToggleChipText,
+                            active && styles.leadToggleChipTextActive,
+                          ]}
+                        >
+                          {active ? "✓ " : "+"}{formatLead(mins)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Simple Reminders */}
+              <View style={styles.leadCategoryCard}>
+                <View style={styles.leadCategoryHeader}>
+                  <Text style={styles.leadCategoryTitle}>⏰ Simple Reminders</Text>
+                  <Text style={styles.leadCategoryCurrent}>
+                    {userDefaults.simple.length > 0
+                      ? userDefaults.simple.map(formatLead).join(", ") + " before"
+                      : "At event time"}
+                  </Text>
+                </View>
+                <View style={styles.leadChipsRow}>
+                  {[5, 15, 30, 60].map((mins) => {
+                    const active = userDefaults.simple.includes(mins);
+                    return (
+                      <Pressable
+                        key={mins}
+                        accessibilityRole="button"
+                        onPress={() => void handleToggleLeadTime("simple", mins)}
+                        style={({ pressed }) => [
+                          styles.leadToggleChip,
+                          active && styles.leadToggleChipActive,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.leadToggleChipText,
+                            active && styles.leadToggleChipTextActive,
+                          ]}
+                        >
+                          {active ? "✓ " : "+"}{formatLead(mins)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.voiceTipBox}>
+                <Text style={styles.voiceTipIcon}>🎙️</Text>
+                <Text style={styles.voiceTipText}>
+                  Voice settable: Say <Text style={styles.voiceTipQuote}>"Hey Assistant, give me a heads-up 30 minutes before every meeting"</Text> to adjust defaults hands-free.
+                </Text>
+              </View>
             </View>
 
             <View style={styles.divider} />
@@ -654,6 +826,89 @@ const styles = StyleSheet.create({
   },
   accountPillTextDisconnected: {
     color: "#475569",
+  },
+  leadTimesBlock: {
+    gap: spacing.xs + 4,
+  },
+  leadTimesSubtext: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: -2,
+    marginBottom: 4,
+  },
+  leadCategoryCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: radius.lg,
+    padding: spacing.sm + 2,
+    borderWidth: 1,
+    borderColor: "rgba(226, 232, 240, 0.9)",
+    gap: spacing.xs + 2,
+  },
+  leadCategoryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  leadCategoryTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  leadCategoryCurrent: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
+  leadChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  leadToggleChip: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(203, 213, 225, 0.8)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.md,
+  },
+  leadToggleChipActive: {
+    backgroundColor: "#1D4ED8",
+    borderColor: "#1D4ED8",
+  },
+  leadToggleChipText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  leadToggleChipTextActive: {
+    color: "#FFFFFF",
+  },
+  voiceTipBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.xs + 2,
+    backgroundColor: "rgba(37, 99, 235, 0.06)",
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    marginTop: 2,
+  },
+  voiceTipIcon: {
+    fontSize: 14,
+    marginTop: 1,
+  },
+  voiceTipText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 15,
+    color: "#334155",
+  },
+  voiceTipQuote: {
+    fontWeight: "700",
+    color: "#1D4ED8",
+  },
+  pressed: {
+    opacity: 0.8,
   },
   spacer: {
     flexGrow: 1,
