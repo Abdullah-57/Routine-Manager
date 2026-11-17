@@ -110,6 +110,10 @@ function RootNavigator() {
           name="settings/connections"
           options={{ title: "Connected Accounts", presentation: "card", headerShown: false }}
         />
+        <Stack.Screen
+          name="contacts"
+          options={{ title: "Contacts", presentation: "card", headerShown: false }}
+        />
       </Stack>
     </ThemeProvider>
   );

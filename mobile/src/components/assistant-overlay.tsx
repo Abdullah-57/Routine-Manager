@@ -310,7 +310,7 @@ export function AssistantOverlay({
     headline = isTtsSpeaking ? "Assistant speaking..." : "Routine scheduled";
     subheadline = isTtsSpeaking
       ? "Reading your confirmation aloud"
-      : "Spoken confirmation";
+      : "Preparing spoken confirmation...";
   } else if (phase === "follow_up") {
     headline = "Anything else?";
     subheadline =
@@ -400,7 +400,7 @@ export function AssistantOverlay({
             <Text style={styles.headline}>{headline}</Text>
             <Text style={styles.subheadline}>{subheadline}</Text>
 
-            {/* Clear Visual Readiness Pill */}
+            {/* Clear Visual Readiness Pill — strictly visible only when the assistant is done speaking and ready to listen */}
             {phase === "listening" && !isTtsSpeaking ? (
               <View style={styles.activePillGreen}>
                 <View style={styles.activePillDotGreen} />
@@ -412,14 +412,14 @@ export function AssistantOverlay({
                       : "🟢 Microphone active · Listening for your routine..."}
                 </Text>
               </View>
-            ) : followUpWakeDetected && !isTtsSpeaking ? (
+            ) : followUpWakeDetected && phase !== "responding" && !isTtsSpeaking ? (
               <View style={styles.activePillGreen}>
                 <View style={styles.activePillDotGreen} />
                 <Text style={styles.activePillTextGreen}>
                   ✨ Ready! Speak your routine now
                 </Text>
               </View>
-            ) : phase === "follow_up" ? (
+            ) : phase === "follow_up" && !isTtsSpeaking ? (
               <View style={styles.activePillCyan}>
                 <View style={styles.activePillDotCyan} />
                 <Text style={styles.activePillTextCyan}>
@@ -448,7 +448,7 @@ export function AssistantOverlay({
               <View style={styles.responseBubble}>
                 <View style={styles.responseHeader}>
                   <Text style={styles.responseTag}>Assistant</Text>
-                  {isTtsSpeaking ? (
+                  {isTtsSpeaking && phase === "responding" ? (
                     <Pressable
                       onPress={onStopSpeaking}
                       style={styles.stopTtsButton}

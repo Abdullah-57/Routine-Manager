@@ -28,6 +28,20 @@ export function isTtsAvailable(): boolean {
   return Boolean(ExpoSpeechModule && typeof ExpoSpeechModule.speak === "function");
 }
 
+/**
+ * Proactively initializes the native Text-To-Speech engine in the background
+ * to eliminate cold-start latency when speech is requested.
+ */
+export function warmupSpeech(): void {
+  if (isTtsAvailable() && ExpoSpeechModule) {
+    try {
+      void ExpoSpeechModule.isSpeakingAsync().catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export type SpeakTextOptions = {
   rate?: number;
   pitch?: number;
@@ -44,6 +58,7 @@ let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let finalWordTimer: ReturnType<typeof setTimeout> | null = null;
 let audioFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let activePollInterval: ReturnType<typeof setInterval> | null = null;
+let activeStartFailsafeTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Accurately estimates speech duration in milliseconds based on word count,
@@ -52,15 +67,16 @@ let activePollInterval: ReturnType<typeof setInterval> | null = null;
 export function estimateSpeechDurationMs(text: string): number {
   const clean = text.trim();
   if (!clean) return 0;
-  const words = clean.split(/\s+/).filter(Boolean);
+  // Replace links with short token so URLs don't skew word counts
+  const words = clean.replace(/https?:\/\/\S+/g, "link").split(/\s+/).filter(Boolean);
   let spokenCount = words.length;
-  // Times like "7:00" or "12:30" are spoken as multiple words ("seven o'clock" / "twelve thirty")
+  // Times like "7:00" or "12:30" add extra spoken syllables
   const times = clean.match(/\b\d{1,2}:\d{2}\b/g);
   if (times) spokenCount += times.length * 2;
-  // Punctuation introduces natural breathing pauses
+  // Punctuation introduces brief breathing pauses
   const punctuation = (clean.match(/[,;:.!?]/g) || []).length;
-  const durationMs = spokenCount * 380 + punctuation * 180 + 350;
-  return Math.max(1600, Math.min(15000, durationMs));
+  const durationMs = spokenCount * 330 + punctuation * 160 + 500;
+  return Math.max(1600, Math.min(16000, durationMs));
 }
 
 /**
@@ -83,11 +99,42 @@ export async function speakText(
   await stopSpeaking();
 
   let finished = false;
+  let hasStarted = false;
+  let speechStartTime = 0;
+
+  const estimatedDurationMs = estimateSpeechDurationMs(clean);
+  // Ensure polling NEVER fires before at least 70% of the speech duration has elapsed
+  const minRequiredDurationMs = Math.max(1400, Math.round(estimatedDurationMs * 0.70));
+
+  const notifyStart = () => {
+    if (finished || hasStarted) return;
+    hasStarted = true;
+    speechStartTime = Date.now();
+
+    if (activeStartFailsafeTimer) {
+      clearTimeout(activeStartFailsafeTimer);
+      activeStartFailsafeTimer = null;
+    }
+
+    // Safety fallback timer: starts counting STRICTLY from when audio actually begins playing
+    if (fallbackTimer) {
+      clearTimeout(fallbackTimer);
+    }
+    fallbackTimer = setTimeout(() => {
+      cleanupAndDone(false);
+    }, Math.max(5000, estimatedDurationMs + 2500));
+
+    options.onStart?.();
+  };
 
   const cleanupAndDone = (wasStopped = false) => {
     if (finished) return;
     finished = true;
 
+    if (activeStartFailsafeTimer) {
+      clearTimeout(activeStartFailsafeTimer);
+      activeStartFailsafeTimer = null;
+    }
     if (fallbackTimer) {
       clearTimeout(fallbackTimer);
       fallbackTimer = null;
@@ -105,8 +152,17 @@ export async function speakText(
       activePollInterval = null;
     }
 
+    if (ExpoSpeechModule) {
+      try {
+        ExpoSpeechModule.stop();
+      } catch {
+        // ignore
+      }
+    }
+
     if (activeAudioPlayer) {
       try {
+        activeAudioPlayer.pause();
         activeAudioPlayer.remove();
       } catch {
         // ignore
@@ -121,12 +177,6 @@ export async function speakText(
     }
   };
 
-  const startTime = Date.now();
-  const estimatedDurationMs = estimateSpeechDurationMs(clean);
-  const wordsCount = clean.split(/\s+/).filter(Boolean).length;
-  // Guaranteed minimum duration: speech cannot legitimately finish faster than ~240ms/word
-  const minRequiredDurationMs = Math.max(1200, wordsCount * 240);
-
   // 1. Primary: 100% free offline native TTS engine (AVSpeechSynthesizer / Android TextToSpeech)
   if (isTtsAvailable() && ExpoSpeechModule) {
     try {
@@ -137,42 +187,10 @@ export async function speakText(
         pitch: options.pitch ?? 1.0,
         language: options.language ?? "en-US",
         onStart: () => {
-          options.onStart?.();
-        },
-        onBoundary: (event: any) => {
-          const charIndex =
-            typeof event?.charIndex === "number" ? event.charIndex : 0;
-          const charLength =
-            typeof event?.charLength === "number" ? event.charLength : 0;
-          const remainingText = clean.slice(charIndex + charLength).trim();
-          const remainingWords = remainingText
-            ? remainingText.split(/\s+/).filter(Boolean).length
-            : 0;
-
-          // When the native engine reaches the final word:
-          // Give 1200ms for the full pronunciation of the final word/time.
-          // This ensures that if Android drops onDone, completion still fires cleanly without hanging.
-          if (remainingWords === 0) {
-            if (finalWordTimer) {
-              clearTimeout(finalWordTimer);
-            }
-            finalWordTimer = setTimeout(() => {
-              cleanupAndDone(false);
-            }, 1200);
-          }
+          notifyStart();
         },
         onDone: () => {
-          if (finalWordTimer) {
-            clearTimeout(finalWordTimer);
-            finalWordTimer = null;
-          }
-          // Buffer 160ms so Android's AudioTrack finishes physical speaker playback before mic unpauses
-          if (audioFlushTimer) {
-            clearTimeout(audioFlushTimer);
-          }
-          audioFlushTimer = setTimeout(() => {
-            cleanupAndDone(false);
-          }, 160);
+          cleanupAndDone(false);
         },
         onStopped: () => {
           cleanupAndDone(true);
@@ -183,12 +201,17 @@ export async function speakText(
         },
       };
 
-      options.onStart?.();
+      // Failsafe: if the device's native TTS engine doesn't emit onStart (rare on custom ROMs),
+      // trigger notifyStart after 900ms so UI and timers proceed smoothly
+      activeStartFailsafeTimer = setTimeout(() => {
+        notifyStart();
+      }, 900);
+
       ExpoSpeechModule.speak(clean, speechOpts);
 
-      // Safe, state-gated polling:
-      // Never checks until minRequiredDurationMs has elapsed, and requires 2 consecutive false
-      // checks (300ms apart) to prevent mid-speech pause false-positives.
+      // Reliable polling: checks every 80ms strictly AFTER speech has actually started
+      // and min threshold has elapsed. Requires 4 consecutive false checks (320ms sustained silence)
+      // so natural pauses between words or sentences are never cut off.
       activePollInterval = setInterval(async () => {
         if (finished) {
           if (activePollInterval) {
@@ -198,7 +221,12 @@ export async function speakText(
           return;
         }
 
-        const elapsed = Date.now() - startTime;
+        // Never evaluate completion before speech has actually started
+        if (!hasStarted || speechStartTime === 0) {
+          return;
+        }
+
+        const elapsed = Date.now() - speechStartTime;
         if (elapsed < minRequiredDurationMs) {
           return;
         }
@@ -208,14 +236,8 @@ export async function speakText(
             const speaking = await ExpoSpeechModule.isSpeakingAsync();
             if (!speaking) {
               consecutiveFalseCount++;
-              if (consecutiveFalseCount >= 2) {
-                // Speech is fully complete
-                if (audioFlushTimer) {
-                  clearTimeout(audioFlushTimer);
-                }
-                audioFlushTimer = setTimeout(() => {
-                  cleanupAndDone(false);
-                }, 100);
+              if (consecutiveFalseCount >= 4) {
+                cleanupAndDone(false);
               }
             } else {
               consecutiveFalseCount = 0;
@@ -224,12 +246,7 @@ export async function speakText(
             // ignore
           }
         }
-      }, 150);
-
-      // Absolute safety timeout: generous upper bound to prevent hanging indefinitely
-      fallbackTimer = setTimeout(() => {
-        cleanupAndDone(false);
-      }, Math.max(6500, estimatedDurationMs * 1.5 + 2500));
+      }, 80);
 
       return;
     } catch (err) {
@@ -266,11 +283,13 @@ export async function speakText(
 
     const player = createAudioPlayer(ttsUrl, { downloadFirst: true });
     activeAudioPlayer = player;
+    let hasStartedPlaying = false;
     let scheduledAudioEnd = false;
 
     player.addListener("playbackStatusUpdate", (status) => {
       if (status.playing) {
-        options.onStart?.();
+        hasStartedPlaying = true;
+        notifyStart();
       }
 
       if (status.duration && status.duration > 0 && !scheduledAudioEnd) {
@@ -279,7 +298,7 @@ export async function speakText(
           100,
           Math.round(
             (status.duration - (status.currentTime || 0)) * 1000,
-          ) + 80,
+          ) + 60,
         );
         if (fallbackTimer) {
           clearTimeout(fallbackTimer);
@@ -289,22 +308,27 @@ export async function speakText(
         }, remainingMs);
       }
 
-      // Check if finished via didJustFinish or playbackState "ended"
+      // Check if finished via didJustFinish, playbackState "ended", or stopped playing
       const isEnded =
         status.didJustFinish ||
         status.playbackState === "ended" ||
+        (hasStartedPlaying && !status.playing) ||
         (status.duration > 0 &&
-          status.currentTime >= status.duration - 0.08);
+          status.currentTime >= status.duration - 0.2);
 
       if (isEnded) {
         cleanupAndDone(false);
       }
     });
 
-    options.onStart?.();
+    // Failsafe for network audio in case playback status is delayed
+    activeStartFailsafeTimer = setTimeout(() => {
+      notifyStart();
+    }, 4000);
+
     player.play();
 
-    // Polling on player.currentTime and player.duration for instant completion
+    // Responsive 60ms polling on player position, playing flag, and playbackState
     activePollInterval = setInterval(() => {
       if (finished || !activeAudioPlayer) {
         if (activePollInterval) {
@@ -316,24 +340,33 @@ export async function speakText(
       try {
         const cur = activeAudioPlayer.currentTime;
         const dur = activeAudioPlayer.duration;
-        if (dur > 0 && cur >= dur - 0.08) {
+        const isPlaying = activeAudioPlayer.playing;
+        const status = activeAudioPlayer.currentStatus;
+
+        if (isPlaying) {
+          hasStartedPlaying = true;
+        }
+
+        if (
+          status?.didJustFinish ||
+          status?.playbackState === "ended" ||
+          (hasStartedPlaying && !isPlaying) ||
+          (dur > 0 && cur >= dur - 0.2)
+        ) {
           cleanupAndDone(false);
         }
       } catch {
         // ignore
       }
-    }, 100);
+    }, 60);
 
-    fallbackTimer = setTimeout(() => {
-      cleanupAndDone(false);
-    }, Math.max(6500, estimatedDurationMs * 1.5 + 2500));
     return;
   } catch (err) {
     console.warn("[SpeechService] Audio player fallback failed:", err);
   }
 
   // 3. Visual duration fallback: Ensure equalizer soundwave animates even if all audio output fails
-  options.onStart?.();
+  notifyStart();
   fallbackTimer = setTimeout(() => {
     cleanupAndDone(false);
   }, estimatedDurationMs);
@@ -343,6 +376,11 @@ export async function speakText(
  * Interrupts current speech immediately.
  */
 export async function stopSpeaking(): Promise<void> {
+  if (activeStartFailsafeTimer) {
+    clearTimeout(activeStartFailsafeTimer);
+    activeStartFailsafeTimer = null;
+  }
+
   if (fallbackTimer) {
     clearTimeout(fallbackTimer);
     fallbackTimer = null;

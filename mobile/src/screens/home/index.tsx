@@ -47,6 +47,7 @@ import {
   estimateSpeechDurationMs,
   speakText,
   stopSpeaking,
+  warmupSpeech,
 } from "@/assistant/speech-service";
 import {
   isClosingPhrase,
@@ -244,6 +245,8 @@ export function HomeScreen() {
   );
   const assistantOverlayOpenRef = useRef(assistantOverlayOpen);
   assistantOverlayOpenRef.current = assistantOverlayOpen;
+  const assistantPhaseRef = useRef(assistantPhase);
+  assistantPhaseRef.current = assistantPhase;
   const isTtsSpeakingRef = useRef(isTtsSpeaking);
   isTtsSpeakingRef.current = isTtsSpeaking;
   const assistantSessionIdRef = useRef<string | null>(null);
@@ -300,6 +303,11 @@ export function HomeScreen() {
       }).catch(() => {});
     }
   }, [token, user, timezone]);
+
+  // Proactively warm up native speech engine on app load so assistant speech starts with zero delay
+  useEffect(() => {
+    warmupSpeech();
+  }, []);
 
   const sortedReminders = useMemo(
     () => sortNewestFirst(allReminders),
@@ -366,7 +374,8 @@ export function HomeScreen() {
 
     setJustCreatedIds(new Set(created.map((item) => item.id)));
 
-    await Promise.all([
+    // Sync native local push notifications in background so speech starts with zero delay
+    void Promise.all([
       ...created.map((item) => scheduleReminderLocalNotification(item)),
       ...updated.map(async (item) => {
         if (item.status === "scheduled") {
@@ -376,7 +385,9 @@ export function HomeScreen() {
         }
       }),
       ...deleted.map((item) => cancelReminderLocalNotification(item.id)),
-    ]);
+    ]).catch((err) => {
+      console.warn("[LocalReminders] Sync error:", err);
+    });
 
     const changedCount = created.length + updated.length + deleted.length;
     const baseMessage = result.assistantMessage || "Reminders processed.";
@@ -425,60 +436,68 @@ export function HomeScreen() {
       });
       setAssistantSpokenMessage(baseMessage);
       setAssistantPhase("responding");
+      setIsTtsSpeaking(false);
 
       if (prefs.spokenFeedbackEnabled) {
-        setIsTtsSpeaking(true);
-
-        // Safety watchdog: emergency safety backstop so UI never hangs indefinitely
-        const maxAudioWaitMs = Math.max(
-          6500,
-          estimateSpeechDurationMs(baseMessage) * 1.5 + 2500,
-        );
-        const watchdogTimer = setTimeout(() => {
-          if (isTtsSpeakingRef.current) {
-            setIsTtsSpeaking(false);
-            setFollowUpWakeDetected(true);
-            setAssistantPhase("listening");
-            setAssistantLiveTranscript("");
-            wakeWordRef.current?.clearTranscript();
-            startAssistantIdleTimer();
+        let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+        const clearWatchdog = () => {
+          if (watchdogTimer) {
+            clearTimeout(watchdogTimer);
+            watchdogTimer = null;
           }
-        }, maxAudioWaitMs);
+        };
 
         void speakText(baseMessage, {
           token,
           onStart: () => {
-            setIsTtsSpeaking(true);
+            if (assistantPhaseRef.current === "responding") {
+              setIsTtsSpeaking(true);
+              clearWatchdog();
+              // Safety watchdog: measured strictly from when audio actually starts playing
+              const maxAudioWaitMs = Math.max(
+                5000,
+                estimateSpeechDurationMs(baseMessage) + 2500,
+              );
+              watchdogTimer = setTimeout(() => {
+                void stopSpeaking();
+                setIsTtsSpeaking(false);
+                setFollowUpWakeDetected(false);
+                setAssistantPhase("listening");
+                setAssistantLiveTranscript("");
+                wakeWordRef.current?.clearTranscript();
+                startAssistantIdleTimer();
+              }, maxAudioWaitMs);
+            }
           },
           onDone: () => {
-            clearTimeout(watchdogTimer);
+            clearWatchdog();
             setIsTtsSpeaking(false);
-            setFollowUpWakeDetected(true);
+            setFollowUpWakeDetected(false);
             setAssistantPhase("listening");
             setAssistantLiveTranscript("");
             wakeWordRef.current?.clearTranscript();
             startAssistantIdleTimer();
           },
           onStopped: () => {
-            clearTimeout(watchdogTimer);
+            clearWatchdog();
             setIsTtsSpeaking(false);
-            setFollowUpWakeDetected(true);
+            setFollowUpWakeDetected(false);
             setAssistantPhase("listening");
             setAssistantLiveTranscript("");
             wakeWordRef.current?.clearTranscript();
             startAssistantIdleTimer();
           },
           onError: () => {
-            clearTimeout(watchdogTimer);
+            clearWatchdog();
             setIsTtsSpeaking(false);
-            setFollowUpWakeDetected(true);
+            setFollowUpWakeDetected(false);
             setAssistantPhase("listening");
             startAssistantIdleTimer();
           },
         });
       } else {
         setIsTtsSpeaking(false);
-        setFollowUpWakeDetected(true);
+        setFollowUpWakeDetected(false);
         setAssistantPhase("listening");
         setAssistantLiveTranscript("");
         wakeWordRef.current?.clearTranscript();
@@ -510,6 +529,7 @@ export function HomeScreen() {
 
       isSubmittingRef.current = true;
       setPlan({ status: "loading" });
+      warmupSpeech();
 
       try {
         const result = await parseRoutine(token, {
@@ -533,24 +553,33 @@ export function HomeScreen() {
           setAssistantPhase("error");
           setAssistantError(message);
           if (prefs.spokenFeedbackEnabled) {
-            setIsTtsSpeaking(true);
             void speakText(
               "I couldn't process that. Please try speaking again.",
               {
                 token,
-                onStart: () => setIsTtsSpeaking(true),
+                onStart: () => {
+                  if (
+                    assistantPhaseRef.current === "error" ||
+                    assistantPhaseRef.current === "responding"
+                  ) {
+                    setIsTtsSpeaking(true);
+                  }
+                },
                 onDone: () => {
                   setIsTtsSpeaking(false);
+                  setFollowUpWakeDetected(false);
                   setAssistantPhase("listening");
                   startAssistantIdleTimer();
                 },
                 onStopped: () => {
                   setIsTtsSpeaking(false);
+                  setFollowUpWakeDetected(false);
                   setAssistantPhase("listening");
                   startAssistantIdleTimer();
                 },
                 onError: () => {
                   setIsTtsSpeaking(false);
+                  setFollowUpWakeDetected(false);
                   setAssistantPhase("listening");
                   startAssistantIdleTimer();
                 },
@@ -613,19 +642,28 @@ export function HomeScreen() {
 
       // Check for closing phrase ("done", "that's all", "thank you", "cancel")
       if (isClosingPhrase(cleanInstruction)) {
+        clearAssistantIdleTimer();
+        setFollowUpWakeDetected(false);
         setAssistantPhase("done");
+        setAssistantLiveTranscript("");
+        wakeWordRef.current?.clearTranscript();
+
         void Haptics.notificationAsync(
           Haptics.NotificationFeedbackType.Success,
         ).catch(() => {});
 
         if (prefs.spokenFeedbackEnabled) {
-          setIsTtsSpeaking(true);
-          await speakText("You're all set! Have a great day.", {
+          setIsTtsSpeaking(false);
+          void speakText("You're all set! Have a great day.", {
             token,
-            onStart: () => setIsTtsSpeaking(true),
+            onStart: () => {
+              if (assistantPhaseRef.current === "done") {
+                setIsTtsSpeaking(true);
+              }
+            },
             onDone: () => {
               setIsTtsSpeaking(false);
-              setTimeout(() => handleCloseAssistant(), 1000);
+              setTimeout(() => handleCloseAssistant(), 800);
             },
             onStopped: () => {
               setIsTtsSpeaking(false);
@@ -666,6 +704,7 @@ export function HomeScreen() {
       phrase: string;
       trailingTranscript: string;
     }) => {
+      warmupSpeech();
       setWakeFeedback(`✨ "${phrase}" detected!`);
       setTimeout(() => setWakeFeedback(null), 3500);
 
@@ -701,6 +740,7 @@ export function HomeScreen() {
   );
 
   const handleOpenAssistantManually = useCallback(() => {
+    warmupSpeech();
     clearAssistantIdleTimer();
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
       () => {},
@@ -721,10 +761,18 @@ export function HomeScreen() {
     enabled: prefs.assistantEnabled && prefs.microphoneEnabled,
     wakePhrase: prefs.wakePhrase,
     sensitivity: prefs.wakeSensitivity,
-    paused: voiceSheetOpen || isVoiceBusy || busy || isTtsSpeaking,
+    paused:
+      voiceSheetOpen ||
+      isVoiceBusy ||
+      busy ||
+      isTtsSpeaking ||
+      assistantPhase === "done",
     mode: assistantOverlayOpen ? "conversation" : "wake",
     onWake: handleWakeDetected,
     onFollowUpWake: (_phrase) => {
+      if (assistantPhaseRef.current === "done") return;
+      void stopSpeaking();
+      setIsTtsSpeaking(false);
       clearAssistantIdleTimer();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
         () => {},
@@ -736,16 +784,21 @@ export function HomeScreen() {
       startAssistantIdleTimer();
     },
     onTranscript: (transcript) => {
-      if (assistantOverlayOpenRef.current && !isTtsSpeakingRef.current) {
+      if (
+        assistantOverlayOpenRef.current &&
+        assistantPhaseRef.current === "listening" &&
+        !isTtsSpeakingRef.current
+      ) {
         clearAssistantIdleTimer();
         setAssistantLiveTranscript(transcript);
-        if (transcript.trim().length > 0) {
-          setAssistantPhase("listening");
-        }
       }
     },
     onUtteranceComplete: (transcript) => {
-      if (assistantOverlayOpenRef.current && !isTtsSpeakingRef.current) {
+      if (
+        assistantOverlayOpenRef.current &&
+        assistantPhaseRef.current === "listening" &&
+        !isTtsSpeakingRef.current
+      ) {
         void handleAssistantUtterance(transcript);
       }
     },

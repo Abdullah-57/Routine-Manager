@@ -306,6 +306,30 @@ export function HomeSidebar({
                   </Text>
                 </View>
               </Pressable>
+
+              <Pressable
+                style={[styles.accountCard, { marginTop: spacing.xs }]}
+                onPress={() => {
+                  onClose();
+                  router.push("/contacts");
+                }}
+              >
+                <View style={styles.accountCardLeft}>
+                  <View style={styles.contactsIconCircle}>
+                    <Text style={styles.contactsIconText}>👥</Text>
+                  </View>
+                  <View style={styles.accountCardMeta}>
+                    <Text style={styles.accountCardTitle}>Contacts</Text>
+                    <Text style={styles.accountCardSubtitle} numberOfLines={1}>
+                      Fallback address book for meeting invites
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.contactsPill}>
+                  <Text style={styles.contactsPillText}>Open ›</Text>
+                </View>
+              </Pressable>
             </View>
 
             <View style={styles.divider} />
@@ -561,6 +585,28 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "800",
+  },
+  contactsIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contactsIconText: {
+    fontSize: 16,
+  },
+  contactsPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+  },
+  contactsPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#1D4ED8",
   },
   accountCardMeta: {
     flex: 1,

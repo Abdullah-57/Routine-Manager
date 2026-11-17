@@ -49,7 +49,10 @@ export async function findContact(
   try {
     const localContacts = await Contact.find({
       userId,
-      name: { $regex: trimmed, $options: "i" },
+      $or: [
+        { name: { $regex: trimmed, $options: "i" } },
+        { email: { $regex: trimmed, $options: "i" } },
+      ],
     }).limit(5);
 
     for (const c of localContacts) {
