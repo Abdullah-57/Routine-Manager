@@ -1,5 +1,5 @@
 import { AudioModule } from "expo-audio";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -206,6 +206,9 @@ function ReminderRow({
 
 export function HomeScreen() {
   const router = useRouter();
+  const { triggerAssistant } = useLocalSearchParams<{
+    triggerAssistant?: string;
+  }>();
   const { user, token, logout } = useAuth();
   const prefs = useAppPreferences();
   const insets = useSafeAreaInsets();
@@ -765,6 +768,13 @@ export function HomeScreen() {
     wakeWordRef.current?.clearTranscript();
     startAssistantIdleTimer();
   }, [clearAssistantIdleTimer, startAssistantIdleTimer]);
+
+  useEffect(() => {
+    if (triggerAssistant === "true") {
+      handleOpenAssistantManually();
+      router.setParams({ triggerAssistant: undefined });
+    }
+  }, [triggerAssistant, handleOpenAssistantManually, router]);
 
   const wakeWord = useWakeWord({
     enabled: prefs.assistantEnabled && prefs.microphoneEnabled,

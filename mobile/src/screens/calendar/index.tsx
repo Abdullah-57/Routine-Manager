@@ -15,9 +15,10 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { ApiError, pingHealth } from "@/api/client";
 import { sendTestPush } from "@/api/notifications";
 import { listReminders, type ReminderSummary } from "@/api/reminders";
+import * as Haptics from "expo-haptics";
 import { useAuth } from "@/auth/AuthContext";
 import { DayStrip } from "@/components/day-strip";
-import { DayTimeline } from "@/components/day-timeline";
+import { DayTimeline, type TimelineViewMode } from "@/components/day-timeline";
 import { HomeSidebar } from "@/components/home-sidebar";
 import { MonthCalendar } from "@/components/month-calendar";
 import { FeedbackBanner } from "@/components/ui/feedback-banner";
@@ -140,6 +141,7 @@ export function CalendarScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isCalendarCollapsed, setIsCalendarCollapsed] = useState(false);
+  const [viewMode, setViewMode] = useState<TimelineViewMode>("day");
   // Double-submit guard: focus effect, pull-to-refresh and the Retry button
   // all trigger fetchMonth — never let two fetches overlap.
   const fetchInFlightRef = useRef(false);
@@ -214,13 +216,22 @@ export function CalendarScreen() {
     [visibleMonth.year, visibleMonth.month],
   );
 
-  const goToNextDay = useCallback(() => {
-    handleSelectDate(shiftDateKey(selectedDate, 1));
-  }, [handleSelectDate, selectedDate]);
+  const stepDays = viewMode === "week" ? 7 : viewMode === "3day" ? 3 : 1;
 
-  const goToPrevDay = useCallback(() => {
-    handleSelectDate(shiftDateKey(selectedDate, -1));
-  }, [handleSelectDate, selectedDate]);
+  const goToNext = useCallback(() => {
+    handleSelectDate(shiftDateKey(selectedDate, stepDays));
+  }, [handleSelectDate, selectedDate, stepDays]);
+
+  const goToPrev = useCallback(() => {
+    handleSelectDate(shiftDateKey(selectedDate, -stepDays));
+  }, [handleSelectDate, selectedDate, stepDays]);
+
+  const handlePressEmptyMic = useCallback(() => {
+    push({
+      pathname: "/",
+      params: { triggerAssistant: "true" },
+    });
+  }, [push]);
 
   const dayReminders = useMemo(() => {
     // Applies to ALL reminders (old and new): earliest startAt at top.
@@ -415,14 +426,14 @@ export function CalendarScreen() {
           />
         ) : null}
 
-        {/* Timeline Header Row with Title, Day Steppers, Event Count, Today jump, and Calendar toggle */}
+        {/* Timeline Header Row with Title, Period Steppers, Event Count, Today jump, and Calendar toggle */}
         <View style={styles.timelineHeaderRow}>
           <View style={styles.timelineTitleGroup}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Previous day"
+              accessibilityLabel="Previous period"
               hitSlop={8}
-              onPress={goToPrevDay}
+              onPress={goToPrev}
               style={({ pressed }) => [
                 styles.dayNavArrow,
                 pressed ? styles.pressed : null,
@@ -437,9 +448,9 @@ export function CalendarScreen() {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Next day"
+              accessibilityLabel="Next period"
               hitSlop={8}
-              onPress={goToNextDay}
+              onPress={goToNext}
               style={({ pressed }) => [
                 styles.dayNavArrow,
                 pressed ? styles.pressed : null,
@@ -491,13 +502,50 @@ export function CalendarScreen() {
           </View>
         </View>
 
-        {/* Compact Day-Strip of 7 date chips above the timeline */}
-        <DayStrip
-          selectedDate={selectedDate}
-          timezone={timezone}
-          dateCounts={dateCounts}
-          onSelectDate={handleSelectDate}
-        />
+        {/* View Mode Switcher: Day / 3-Day / Week */}
+        <View style={styles.viewModeRow}>
+          <View style={styles.viewModeToggle}>
+            {(["day", "3day", "week"] as const).map((mode) => {
+              const isActive = viewMode === mode;
+              const label =
+                mode === "day" ? "Day" : mode === "3day" ? "3-Day" : "Week";
+              return (
+                <Pressable
+                  key={mode}
+                  accessibilityRole="tab"
+                  accessibilityLabel={`${label} view`}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setViewMode(mode);
+                  }}
+                  style={[
+                    styles.viewModeTab,
+                    isActive ? styles.viewModeTabActive : null,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.viewModeText,
+                      isActive ? styles.viewModeTextActive : null,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Compact Day-Strip of 7 date chips (shown in Day mode) */}
+        {viewMode === "day" ? (
+          <DayStrip
+            selectedDate={selectedDate}
+            timezone={timezone}
+            dateCounts={dateCounts}
+            onSelectDate={handleSelectDate}
+          />
+        ) : null}
 
         {load.status === "error" && dayReminders.length > 0 ? (
           <FeedbackBanner
@@ -528,14 +576,16 @@ export function CalendarScreen() {
         ) : (
           <DayTimeline
             dateKey={selectedDate}
-            reminders={dayReminders}
+            reminders={monthReminders}
             timezone={timezone}
             use24HourClock={prefs.use24HourClock}
+            viewMode={viewMode}
             onPressReminder={onPressReminder}
             onRefresh={retryFetchMonth}
             refreshing={load.status === "refreshing"}
-            onSwipeLeft={goToNextDay}
-            onSwipeRight={goToPrevDay}
+            onSwipeLeft={goToNext}
+            onSwipeRight={goToPrev}
+            onPressEmptyMic={handlePressEmptyMic}
           />
         )}
       </View>
@@ -685,6 +735,36 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
+  },
+  viewModeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginVertical: 2,
+  },
+  viewModeToggle: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    borderRadius: radius.full,
+    padding: 3,
+  },
+  viewModeTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+  },
+  viewModeTabActive: {
+    backgroundColor: "#FFFFFF",
+    boxShadow: shadows.subtle,
+  },
+  viewModeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  viewModeTextActive: {
+    color: "#1D4ED8",
+    fontWeight: "700",
   },
   todayBtn: {
     paddingHorizontal: spacing.sm,

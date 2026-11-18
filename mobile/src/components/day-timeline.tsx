@@ -14,8 +14,11 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import type { ReminderSummary } from "@/api/reminders";
 import { ThemedText } from "@/components/ui/themed-text";
 import {
+  dateKeyInTimezone,
   formatTimeOnly,
   getHourAndMinuteInTimezone,
+  getWeekDates,
+  shiftDateKey,
   todayDateKey,
 } from "@/utils/reminder-time";
 import { radius, shadows, spacing } from "@/theme";
@@ -23,6 +26,8 @@ import { radius, shadows, spacing } from "@/theme";
 export const HOUR_HEIGHT = 64;
 const GUTTER_WIDTH = 54;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+export type TimelineViewMode = "day" | "3day" | "week";
 
 export type PositionedTimelineEvent = {
   reminder: ReminderSummary;
@@ -187,6 +192,8 @@ export type DayTimelineProps = {
   refreshing?: boolean;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
+  viewMode?: TimelineViewMode;
+  onPressEmptyMic?: () => void;
 };
 
 export function DayTimeline({
@@ -199,12 +206,85 @@ export function DayTimeline({
   refreshing = false,
   onSwipeLeft,
   onSwipeRight,
+  viewMode = "day",
+  onPressEmptyMic,
 }: DayTimelineProps) {
   const scrollRef = useRef<React.ElementRef<typeof ScrollView> | null>(null);
   const [currentMinutes, setCurrentMinutes] = useState(() => {
     const { hour, minute } = getHourAndMinuteInTimezone(new Date(), timezone);
     return hour * 60 + minute;
   });
+
+  const today = todayDateKey(timezone);
+
+  const visibleDates = useMemo(() => {
+    if (viewMode === "3day") {
+      return [
+        dateKey,
+        shiftDateKey(dateKey, 1),
+        shiftDateKey(dateKey, 2),
+      ];
+    }
+    if (viewMode === "week") {
+      return getWeekDates(dateKey);
+    }
+    return [dateKey];
+  }, [viewMode, dateKey]);
+
+  const isTodayInView = visibleDates.includes(today);
+  const todayIndex = visibleDates.indexOf(today);
+
+  // Update current time indicator every 30 seconds
+  useEffect(() => {
+    if (!isTodayInView) return;
+    const interval = setInterval(() => {
+      const { hour, minute } = getHourAndMinuteInTimezone(new Date(), timezone);
+      setCurrentMinutes(hour * 60 + minute);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [isTodayInView, timezone]);
+
+  const dateLayouts = useMemo(() => {
+    return visibleDates.map((d, colIdx) => {
+      const itemsForDay = reminders.filter(
+        (r) => dateKeyInTimezone(r.startAt, r.timezone || timezone) === d,
+      );
+      const { timed, allDay } = computeTimelineLayout(
+        itemsForDay,
+        timezone,
+        HOUR_HEIGHT,
+      );
+      return {
+        dateKey: d,
+        colIdx,
+        timed,
+        allDay,
+      };
+    });
+  }, [visibleDates, reminders, timezone]);
+
+  const allDayEvents = useMemo(() => {
+    return dateLayouts.flatMap((dl) =>
+      dl.allDay.map((item) => ({ item, dateKey: dl.dateKey })),
+    );
+  }, [dateLayouts]);
+
+  const allTimedEvents = useMemo(() => {
+    const totalDateCols = visibleDates.length;
+    return dateLayouts.flatMap((dl) => {
+      return dl.timed.map((ev) => {
+        const leftPercent =
+          ((dl.colIdx + ev.colIndex / ev.totalCols) / totalDateCols) * 100;
+        const widthPercent = (1 / (totalDateCols * ev.totalCols)) * 100;
+        return {
+          ...ev,
+          dateKey: dl.dateKey,
+          leftPercent,
+          widthPercent,
+        };
+      });
+    });
+  }, [dateLayouts, visibleDates.length]);
 
   const panResponder = useMemo(
     () =>
@@ -229,34 +309,18 @@ export function DayTimeline({
     [onSwipeLeft, onSwipeRight],
   );
 
-  const isToday = dateKey === todayDateKey(timezone);
-
-  // Update current time indicator every 30 seconds
-  useEffect(() => {
-    if (!isToday) return;
-    const interval = setInterval(() => {
-      const { hour, minute } = getHourAndMinuteInTimezone(new Date(), timezone);
-      setCurrentMinutes(hour * 60 + minute);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [isToday, timezone]);
-
-  const { timed, allDay } = useMemo(() => {
-    return computeTimelineLayout(reminders, timezone, HOUR_HEIGHT);
-  }, [reminders, timezone]);
-
   // Auto-scroll to red "now" line on open (or 8:00 AM / first event)
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (isToday) {
+      if (isTodayInView) {
         const nowTop = (currentMinutes / 60) * HOUR_HEIGHT;
         scrollRef.current?.scrollTo({
           y: Math.max(0, nowTop - 140),
           animated: true,
         });
-      } else if (timed.length > 0) {
+      } else if (allTimedEvents.length > 0) {
         scrollRef.current?.scrollTo({
-          y: Math.max(0, timed[0].top - 80),
+          y: Math.max(0, allTimedEvents[0].top - 80),
           animated: true,
         });
       } else {
@@ -269,20 +333,77 @@ export function DayTimeline({
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [dateKey, isToday]);
+  }, [dateKey, isTodayInView, viewMode]);
 
   const nowTop = (currentMinutes / 60) * HOUR_HEIGHT;
 
   return (
     <View style={styles.root} {...panResponder.panHandlers}>
+      {/* Column Date Headers (shown in 3-Day or Week mode) */}
+      {visibleDates.length > 1 ? (
+        <View style={styles.columnHeadersRow}>
+          <View style={styles.columnHeaderGutterSpacer} />
+          <View style={styles.columnHeadersGroup}>
+            {visibleDates.map((d) => {
+              const isToday = d === today;
+              const isSelected = d === dateKey;
+              const dayNum = Number(d.split("-")[2] || "1");
+              const [y, m, dayOfMonth] = d.split("-").map(Number);
+              const dayDate = new Date(Date.UTC(y, m - 1, dayOfMonth, 12, 0, 0));
+              const weekday = new Intl.DateTimeFormat("en-US", {
+                weekday: visibleDates.length === 7 ? "narrow" : "short",
+                timeZone: "UTC",
+              }).format(dayDate);
+
+              return (
+                <View
+                  key={d}
+                  style={[
+                    styles.columnHeaderCell,
+                    isSelected ? styles.columnHeaderCellSelected : null,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.columnHeaderWeekday,
+                      isToday ? styles.columnHeaderWeekdayToday : null,
+                      isSelected ? styles.columnHeaderWeekdaySelected : null,
+                    ]}
+                  >
+                    {weekday}
+                  </Text>
+                  <View
+                    style={[
+                      styles.columnHeaderCircle,
+                      isToday ? styles.columnHeaderCircleToday : null,
+                      isSelected ? styles.columnHeaderCircleSelected : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.columnHeaderDay,
+                        isToday ? styles.columnHeaderDayToday : null,
+                        isSelected ? styles.columnHeaderDaySelected : null,
+                      ]}
+                    >
+                      {dayNum}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
       {/* All-Day Strip at the top */}
-      {allDay.length > 0 ? (
+      {allDayEvents.length > 0 ? (
         <View style={styles.allDayContainer}>
           <View style={styles.allDayGutter}>
             <Text style={styles.allDayGutterText}>ALL DAY</Text>
           </View>
           <View style={styles.allDayContent}>
-            {allDay.map((item) => (
+            {allDayEvents.map(({ item, dateKey: itemDateKey }) => (
               <Pressable
                 key={item.id}
                 accessibilityRole="button"
@@ -305,7 +426,9 @@ export function DayTimeline({
                       : "⏰"}
                 </Text>
                 <Text style={styles.allDayTitle} numberOfLines={1}>
-                  {item.title}
+                  {visibleDates.length > 1
+                    ? `${Number(itemDateKey.split("-")[2] || "1")}: ${item.title}`
+                    : item.title}
                 </Text>
               </Pressable>
             ))}
@@ -331,7 +454,7 @@ export function DayTimeline({
         }
       >
         <Animated.View
-          key={dateKey}
+          key={`${dateKey}-${viewMode}`}
           entering={FadeIn.duration(150)}
           style={styles.timelineBody}
         >
@@ -356,18 +479,66 @@ export function DayTimeline({
               </View>
             ))}
 
-            {/* Empty notice banner if no events */}
-            {timed.length === 0 && allDay.length === 0 ? (
-              <View style={styles.emptyDayNotice} pointerEvents="none">
-                <Text style={styles.emptyDayNoticeIcon}>🗓️</Text>
-                <Text style={styles.emptyDayNoticeText}>No events scheduled</Text>
+            {/* Column Dividers for multi-day mode */}
+            {visibleDates.length > 1
+              ? visibleDates.slice(0, -1).map((_, idx) => (
+                  <View
+                    key={`divider-${idx}`}
+                    style={[
+                      styles.columnDivider,
+                      {
+                        left: `${((idx + 1) / visibleDates.length) * 100}%`,
+                      },
+                    ]}
+                    pointerEvents="none"
+                  />
+                ))
+              : null}
+
+            {/* Empty notice card with tap-to-activate mic button if no events */}
+            {allTimedEvents.length === 0 && allDayEvents.length === 0 ? (
+              <View style={styles.emptyContainer} pointerEvents="box-none">
+                <View style={styles.emptyCard}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Activate voice assistant"
+                    onPress={() => {
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      onPressEmptyMic?.();
+                    }}
+                    style={({ pressed }) => [
+                      styles.emptyMicBtn,
+                      pressed ? styles.emptyMicBtnPressed : null,
+                    ]}
+                  >
+                    <Text style={styles.emptyMicIcon}>🎙️</Text>
+                  </Pressable>
+
+                  <Text style={styles.emptyTitle}>Nothing scheduled</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Say <Text style={styles.emptyHighlight}>“Hey Assistant”</Text> or tap the mic to plan your day
+                  </Text>
+                </View>
               </View>
             ) : null}
 
             {/* Red "Now" Indicator Line */}
-            {isToday ? (
+            {isTodayInView ? (
               <View
-                style={[styles.nowLineContainer, { top: nowTop }]}
+                style={[
+                  styles.nowLineContainer,
+                  {
+                    top: nowTop,
+                    left:
+                      visibleDates.length === 1
+                        ? -GUTTER_WIDTH
+                        : `${(todayIndex / visibleDates.length) * 100}%`,
+                    width:
+                      visibleDates.length === 1
+                        ? "100%"
+                        : `${(1 / visibleDates.length) * 100}%`,
+                  },
+                ]}
                 pointerEvents="none"
               >
                 <View style={styles.nowDot} />
@@ -376,7 +547,7 @@ export function DayTimeline({
             ) : null}
 
             {/* Positioned Event Blocks */}
-            {timed.map((ev) => {
+            {allTimedEvents.map((ev) => {
               const item = ev.reminder;
               const isMeeting =
                 item.kind === "meeting" || Boolean(item.action?.meetLink);
@@ -391,19 +562,18 @@ export function DayTimeline({
                   : ""
               }`;
 
-              const leftPercent = (ev.colIndex / ev.totalCols) * 100;
-              const widthPercent = (1 / ev.totalCols) * 100;
+              const isCompact = visibleDates.length > 3;
 
               return (
                 <View
-                  key={item.id}
+                  key={`${item.id}-${ev.dateKey}`}
                   style={[
                     styles.eventWrapper,
                     {
                       top: ev.top,
                       height: ev.height,
-                      left: `${leftPercent}%`,
-                      width: `${widthPercent}%`,
+                      left: `${ev.leftPercent}%`,
+                      width: `${ev.widthPercent}%`,
                     },
                   ]}
                 >
@@ -461,7 +631,7 @@ export function DayTimeline({
                         >
                           {item.title}
                         </ThemedText>
-                        {isMeeting ? (
+                        {!isCompact && isMeeting ? (
                           <View style={styles.meetPill}>
                             <Text style={styles.meetPillText}>Meet</Text>
                           </View>
@@ -471,8 +641,8 @@ export function DayTimeline({
                         ) : null}
                       </View>
 
-                      {/* Time Label (shown if block is tall enough) */}
-                      {ev.height >= 40 ? (
+                      {/* Time Label (shown if block is tall enough and not too compact) */}
+                      {ev.height >= 40 && !isCompact ? (
                         <Text
                           style={[
                             styles.eventTimeText,
@@ -488,8 +658,8 @@ export function DayTimeline({
                         </Text>
                       ) : null}
 
-                      {/* Notes snippet if tall block */}
-                      {ev.height >= 68 && item.notes?.trim() ? (
+                      {/* Notes snippet if tall block in day mode */}
+                      {ev.height >= 68 && visibleDates.length === 1 && item.notes?.trim() ? (
                         <Text style={styles.eventNotesText} numberOfLines={1}>
                           {item.notes.trim()}
                         </Text>
@@ -751,29 +921,130 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#1D4ED8",
   },
-  emptyDayNotice: {
-    position: "absolute",
-    top: 18,
-    left: 20,
-    right: 20,
+  columnHeadersRow: {
     flexDirection: "row",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(0, 0, 0, 0.1)",
+    backgroundColor: "#F8FAFC",
+    paddingVertical: 6,
+  },
+  columnHeaderGutterSpacer: {
+    width: GUTTER_WIDTH,
+  },
+  columnHeadersGroup: {
+    flex: 1,
+    flexDirection: "row",
+  },
+  columnHeaderCell: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(241, 245, 249, 0.8)",
-    borderWidth: 1,
-    borderColor: "rgba(203, 213, 225, 0.6)",
-    zIndex: 5,
+    gap: 2,
+    paddingVertical: 2,
   },
-  emptyDayNoticeIcon: {
-    fontSize: 14,
+  columnHeaderCellSelected: {
+    backgroundColor: "rgba(37, 99, 235, 0.05)",
+    borderRadius: radius.sm,
   },
-  emptyDayNoticeText: {
+  columnHeaderWeekday: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748B",
+    textTransform: "uppercase",
+  },
+  columnHeaderWeekdayToday: {
+    color: "#2563EB",
+  },
+  columnHeaderWeekdaySelected: {
+    color: "#1D4ED8",
+  },
+  columnHeaderCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  columnHeaderCircleToday: {
+    borderWidth: 1.5,
+    borderColor: "#2563EB",
+  },
+  columnHeaderCircleSelected: {
+    backgroundColor: "#1D4ED8",
+  },
+  columnHeaderDay: {
     fontSize: 12,
     fontWeight: "600",
+    color: "#0F172A",
+  },
+  columnHeaderDayToday: {
+    color: "#2563EB",
+    fontWeight: "700",
+  },
+  columnHeaderDaySelected: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  columnDivider: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(0, 0, 0, 0.08)",
+    zIndex: 1,
+  },
+  emptyContainer: {
+    position: "absolute",
+    top: 60,
+    left: 16,
+    right: 16,
+    alignItems: "center",
+    zIndex: 15,
+  },
+  emptyCard: {
+    width: "100%",
+    maxWidth: 320,
+    alignItems: "center",
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    borderCurve: "continuous",
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.18)",
+    boxShadow: shadows.subtle,
+    gap: spacing.xs,
+  },
+  emptyMicBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: shadows.subtle,
+    marginBottom: spacing.xs,
+  },
+  emptyMicBtnPressed: {
+    backgroundColor: "#1D4ED8",
+    transform: [{ scale: 0.95 }],
+  },
+  emptyMicIcon: {
+    fontSize: 26,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  emptySubtitle: {
+    fontSize: 13,
     color: "#64748B",
+    textAlign: "center",
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  emptyHighlight: {
+    color: "#2563EB",
+    fontWeight: "700",
   },
 });
