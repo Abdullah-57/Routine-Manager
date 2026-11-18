@@ -13,6 +13,7 @@ export type ReminderSummary = {
   localNotificationId: string | null;
   kind?: "simple" | "meeting" | "call" | "custom";
   leadTimes?: number[];
+  dispatchedLeadTimes?: number[];
   action?: {
     type?: "meeting_link" | "email" | "call" | "none";
     status?: "pending" | "done" | "failed";
@@ -92,4 +93,34 @@ export function deleteReminder(token: string, id: string) {
     method: "DELETE",
     token,
   });
+}
+
+export function acknowledgeReminderDispatch(
+  token: string,
+  id: string,
+  leadTimeMinutes: number,
+) {
+  return apiFetch<{ ok: boolean; reminderId: string; dispatchedLeadTimes: number[] }>(
+    `/reminders/${id}/acknowledge-dispatch`,
+    {
+      method: "POST",
+      token,
+      body: { leadTime: leadTimeMinutes },
+    },
+  );
+}
+
+export function syncLocallyScheduledTokensWithBackend(
+  token: string,
+  expoPushToken: string,
+  reminderIds: string[],
+) {
+  return apiFetch<{ ok: boolean; syncedReminderCount: number; expoPushToken: string }>(
+    "/reminders/sync-local-tokens",
+    {
+      method: "POST",
+      token,
+      body: { expoPushToken, reminderIds },
+    },
+  );
 }

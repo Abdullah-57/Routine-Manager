@@ -1,8 +1,19 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { registerDevice } from "@/api/devices";
 import { requestNotificationPermission } from "@/notifications/local-reminders";
+
+const CACHED_PUSH_TOKEN_KEY = "cachedExpoPushToken.v1";
+
+export async function getCachedPushToken(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(CACHED_PUSH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
 
 function resolveEasProjectId(): string | null {
   // Prefer the runtime EAS config (dev client / production builds).
@@ -70,6 +81,7 @@ export async function registerExpoPushTokenWithBackend(
   }
 
   try {
+    await AsyncStorage.setItem(CACHED_PUSH_TOKEN_KEY, expoPushToken);
     await registerDevice(authToken, {
       expoPushToken,
       platform: platformForApi(),

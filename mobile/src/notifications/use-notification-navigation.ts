@@ -2,6 +2,7 @@ import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import { AppState, Platform } from "react-native";
+import { markDispatchHandled, resolveDispatchId } from "./handler";
 
 function reminderIdFromData(data: unknown): string | null {
   if (!data || typeof data !== "object") return null;
@@ -39,9 +40,17 @@ function openReminder(reminderId: string) {
  * Tap a local notification → open that reminder.
  * Queues the target until auth/router are ready (cold start / background).
  */
-export function useNotificationNavigation(ready: boolean) {
+export function useNotificationNavigation(
+  ready: boolean,
+  authToken?: string | null,
+) {
   const pendingIdRef = useRef<string | null>(null);
   const handledIdsRef = useRef(new Set<string>());
+  const authTokenRef = useRef(authToken);
+
+  useEffect(() => {
+    authTokenRef.current = authToken;
+  }, [authToken]);
 
   useEffect(() => {
     if (!ready) return;
@@ -68,6 +77,14 @@ export function useNotificationNavigation(ready: boolean) {
       if (!reminderId) return;
 
       handledIdsRef.current.add(notifId);
+
+      // Record dispatchId so delayed remote pushes are suppressed, and notify backend
+      const resolved = resolveDispatchId(response.notification.request.content.data);
+      if (resolved) {
+        markDispatchHandled(resolved.reminderId, resolved.leadTime, authTokenRef.current);
+      } else {
+        markDispatchHandled(reminderId, 0, authTokenRef.current);
+      }
 
       if (!ready) {
         pendingIdRef.current = reminderId;

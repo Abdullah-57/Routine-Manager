@@ -81,6 +81,7 @@ function publicReminder(reminder: {
   localNotificationId?: string | null;
   kind?: string | null;
   leadTimes?: number[] | null;
+  dispatchedLeadTimes?: number[] | null;
   action?: {
     type?: string | null;
     status?: string | null;
@@ -103,6 +104,7 @@ function publicReminder(reminder: {
     localNotificationId: reminder.localNotificationId ?? null,
     kind: reminder.kind ?? "simple",
     leadTimes: reminder.leadTimes ?? [],
+    dispatchedLeadTimes: reminder.dispatchedLeadTimes ?? [],
     action: reminder.action
       ? {
           type: reminder.action.type ?? "none",
@@ -205,6 +207,16 @@ remindersRouter.post("/", async (req, res) => {
     leadTimes = userDefaults[kind] ?? (kind === "meeting" ? [60, 15] : kind === "call" ? [15] : []);
   }
 
+  const nowMs = Date.now();
+  const STALE_THRESHOLD_MS = 60 * 1000;
+  const pastLeadTimes = (leadTimes || []).filter(
+    (m) => startAt.getTime() - m * 60 * 1000 < nowMs - STALE_THRESHOLD_MS,
+  );
+  if (startAt.getTime() < nowMs - STALE_THRESHOLD_MS) {
+    pastLeadTimes.push(0);
+  }
+  const dispatchedLeadTimes = Array.from(new Set(pastLeadTimes));
+
   const reminder = await Reminder.create({
     userId: req.user!.id,
     title: data.title,
@@ -217,6 +229,7 @@ remindersRouter.post("/", async (req, res) => {
     localNotificationId: data.localNotificationId,
     kind,
     leadTimes,
+    dispatchedLeadTimes,
     action: data.action
       ? {
           type: data.action.type ?? "none",
@@ -303,6 +316,20 @@ remindersRouter.patch("/:id", async (req, res) => {
     reminder.localNotificationId = data.localNotificationId ?? undefined;
   }
 
+  if (data.startAt !== undefined || data.leadTimes !== undefined) {
+    const nowMs = Date.now();
+    const STALE_THRESHOLD_MS = 60 * 1000;
+    const effectiveStart = reminder.startAt.getTime();
+    const effectiveLeads = reminder.leadTimes || [];
+    const pastLeadTimes = effectiveLeads.filter(
+      (m) => effectiveStart - m * 60 * 1000 < nowMs - STALE_THRESHOLD_MS,
+    );
+    if (effectiveStart < nowMs - STALE_THRESHOLD_MS) {
+      pastLeadTimes.push(0);
+    }
+    reminder.dispatchedLeadTimes = Array.from(new Set(pastLeadTimes));
+  }
+
   if (reminder.endAt && reminder.endAt < reminder.startAt) {
     return res.status(400).json({ error: "endAt must be after startAt" });
   }
@@ -326,4 +353,72 @@ remindersRouter.delete("/:id", async (req, res) => {
   }
 
   return res.status(200).json({ ok: true, id: reminder._id.toString() });
+});
+
+/**
+ * Feature 3.2 — Client Alert Acknowledgment.
+ * When an alert (local alarm or push) is delivered/tapped on mobile, the client
+ * calls this endpoint to record the leadTime in dispatchedLeadTimes.
+ * This guarantees the server scheduler will not dispatch a redundant remote push.
+ */
+remindersRouter.post("/:id/acknowledge-dispatch", async (req, res) => {
+  if (!Types.ObjectId.isValid(req.params.id)) {
+    return res.status(404).json({ error: "Reminder not found" });
+  }
+
+  const leadTime = typeof req.body?.leadTime === "number" ? req.body.leadTime : 0;
+
+  const reminder = await Reminder.findOneAndUpdate(
+    { _id: req.params.id, userId: req.user!.id },
+    { $addToSet: { dispatchedLeadTimes: leadTime } },
+    { new: true },
+  );
+
+  if (!reminder) {
+    return res.status(404).json({ error: "Reminder not found" });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    reminderId: reminder._id.toString(),
+    dispatchedLeadTimes: reminder.dispatchedLeadTimes,
+  });
+});
+
+/**
+ * Feature 3.2 — Sync Local Scheduled Device Tokens.
+ * Mobile app calls this with its active push token and the IDs of reminders that
+ * it has scheduled as exact hardware alarms on-device.
+ * The server scheduler excludes this device token from remote pushes for these reminders,
+ * eliminating all duplicate notifications at the root.
+ */
+remindersRouter.post("/sync-local-tokens", async (req, res) => {
+  const expoPushToken = typeof req.body?.expoPushToken === "string" ? req.body.expoPushToken.trim() : "";
+  const reminderIds = Array.isArray(req.body?.reminderIds)
+    ? req.body.reminderIds.filter((id: unknown): id is string => typeof id === "string" && Types.ObjectId.isValid(id))
+    : [];
+
+  if (!expoPushToken) {
+    return res.status(400).json({ error: "expoPushToken is required" });
+  }
+
+  // 1. Add this device token to all reminders that are locally scheduled on this device
+  if (reminderIds.length > 0) {
+    await Reminder.updateMany(
+      { _id: { $in: reminderIds }, userId: req.user!.id },
+      { $addToSet: { localScheduledTokens: expoPushToken } },
+    );
+  }
+
+  // 2. Remove this device token from any reminders that are no longer locally scheduled on this device
+  await Reminder.updateMany(
+    { _id: { $nin: reminderIds }, userId: req.user!.id, localScheduledTokens: expoPushToken },
+    { $pull: { localScheduledTokens: expoPushToken } },
+  );
+
+  return res.status(200).json({
+    ok: true,
+    syncedReminderCount: reminderIds.length,
+    expoPushToken,
+  });
 });

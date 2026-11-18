@@ -53,6 +53,14 @@ const reminderSchema = new Schema(
       type: [Number],
       default: [],
     },
+    dispatchedLeadTimes: {
+      type: [Number],
+      default: [],
+    },
+    localScheduledTokens: {
+      type: [String],
+      default: [],
+    },
     action: {
       type: {
         type: String,

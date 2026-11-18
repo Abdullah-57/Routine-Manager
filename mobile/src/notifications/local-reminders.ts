@@ -2,6 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { syncLocallyScheduledTokensWithBackend } from "@/api/reminders";
+import { tokenStorage } from "@/auth/token-storage";
+import { getCachedPushToken } from "./register-push-token";
 
 const MAP_KEY = "reminderLocalNotificationIds.v1";
 const PERMISSION_ASKED_KEY = "notificationPermissionAsked.v1";
@@ -332,6 +335,7 @@ async function scheduleReminderLocalNotificationInternal(
             deepLink,
             isPreAlert: true,
             leadTimeMinutes: mins,
+            dispatchId: `${reminder.id}:${mins}`,
             meetLink: reminder.action?.meetLink ?? null,
           },
           sound: true,
@@ -391,6 +395,7 @@ async function scheduleReminderLocalNotificationInternal(
             url: `/reminder/${reminder.id}`,
             deepLink,
             isPreAlert: false,
+            dispatchId: `${reminder.id}:0`,
             meetLink: reminder.action?.meetLink ?? null,
           },
           sound: true,
@@ -521,6 +526,26 @@ async function syncLocalNotificationsForRemindersInternal(
 
       await scheduleReminderLocalNotificationInternal(reminder);
     }
+
+    // 4. Notify backend of which reminders this physical device has scheduled locally.
+    // The server-side scheduler uses this to suppress duplicate remote pushes to this phone!
+    void (async () => {
+      try {
+        const [token, pushToken] = await Promise.all([
+          tokenStorage.getToken(),
+          getCachedPushToken(),
+        ]);
+        if (token && pushToken) {
+          await syncLocallyScheduledTokensWithBackend(
+            token,
+            pushToken,
+            Array.from(activeScheduledReminderIds),
+          );
+        }
+      } catch {
+        // Non-fatal
+      }
+    })();
   } catch (error) {
     if (__DEV__) {
       console.warn("syncLocalNotificationsForReminders failed:", error);

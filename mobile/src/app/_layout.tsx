@@ -82,7 +82,7 @@ function RootNavigator() {
     [colorScheme],
   );
   // Wait until auth is ready and user is signed in before pushing reminder routes.
-  useNotificationNavigation(isHydrated && !!token);
+  useNotificationNavigation(isHydrated && !!token, isHydrated ? token : null);
   // Feature 6.2: save Expo push token on the backend after login / hydrate.
   useRegisterPushToken(isHydrated ? token : null);
 

@@ -15,6 +15,7 @@ export type ReminderDto = {
   localNotificationId: string | null;
   kind?: string | null;
   leadTimes?: number[];
+  dispatchedLeadTimes?: number[];
   action?: {
     type?: string | null;
     status?: string | null;
@@ -38,6 +39,7 @@ export function toReminderDto(reminder: {
   localNotificationId?: string | null;
   kind?: string | null;
   leadTimes?: number[] | null;
+  dispatchedLeadTimes?: number[] | null;
   action?: {
     type?: string | null;
     status?: string | null;
@@ -60,6 +62,7 @@ export function toReminderDto(reminder: {
     localNotificationId: reminder.localNotificationId ?? null,
     kind: reminder.kind ?? "simple",
     leadTimes: reminder.leadTimes ?? [],
+    dispatchedLeadTimes: reminder.dispatchedLeadTimes ?? [],
     action: reminder.action
       ? {
           type: reminder.action.type ?? "none",
@@ -206,6 +209,16 @@ export async function createRemindersForUser(
         }
       : undefined;
 
+    const nowMs = now.getTime();
+    const STALE_THRESHOLD_MS = 60 * 1000;
+    const pastLeadTimes = (leadTimes || []).filter(
+      (m) => startAt.getTime() - m * 60 * 1000 < nowMs - STALE_THRESHOLD_MS,
+    );
+    if (startAt.getTime() < nowMs - STALE_THRESHOLD_MS) {
+      pastLeadTimes.push(0);
+    }
+    const dispatchedLeadTimes = Array.from(new Set(pastLeadTimes));
+
     return {
       userId,
       title: item.title.trim(),
@@ -215,6 +228,7 @@ export async function createRemindersForUser(
       timezone,
       kind,
       leadTimes,
+      dispatchedLeadTimes,
       action,
       status: "scheduled" as const,
       source: "ai" as const,
@@ -359,6 +373,20 @@ export async function updateReminderForUser(
   }
 
   if (input.status !== undefined) reminder.status = input.status;
+
+  if (input.startAtISO !== undefined || input.leadTimes !== undefined) {
+    const nowMs = Date.now();
+    const effectiveStart = reminder.startAt.getTime();
+    const STALE_THRESHOLD_MS = 60 * 1000;
+    const effectiveLeads = reminder.leadTimes || [];
+    const pastLeadTimes = effectiveLeads.filter(
+      (m) => effectiveStart - m * 60 * 1000 < nowMs - STALE_THRESHOLD_MS,
+    );
+    if (effectiveStart < nowMs - STALE_THRESHOLD_MS) {
+      pastLeadTimes.push(0);
+    }
+    reminder.dispatchedLeadTimes = Array.from(new Set(pastLeadTimes));
+  }
 
   if (reminder.endAt && reminder.endAt < reminder.startAt) {
     throw new Error("endAt must be after startAt");

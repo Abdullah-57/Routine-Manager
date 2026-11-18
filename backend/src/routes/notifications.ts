@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { Device } from "../models/Device";
 import { sendExpoPush } from "../services/push";
+import { dispatchDueReminders } from "../services/scheduler";
 
 const testSchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
@@ -63,5 +64,21 @@ notificationsRouter.post("/test", requireAuth, async (req, res) => {
     const message =
       error instanceof Error ? error.message : "Failed to send Expo push";
     return res.status(502).json({ error: message });
+  }
+});
+
+/**
+ * Feature 3.2 — Server-side dispatch trigger.
+ * Evaluates all scheduled reminders whose alerts are due right now, dispatches
+ * Expo push notifications to registered devices, and updates dispatchedLeadTimes.
+ */
+notificationsRouter.post("/dispatch-due", requireAuth, async (req, res) => {
+  try {
+    const report = await dispatchDueReminders();
+    return res.status(200).json({ ok: true, report });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to run server reminder dispatch";
+    return res.status(500).json({ error: message });
   }
 });
