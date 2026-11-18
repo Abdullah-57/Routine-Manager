@@ -439,69 +439,78 @@ export function HomeScreen() {
       setIsTtsSpeaking(false);
 
       if (prefs.spokenFeedbackEnabled) {
-        let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
-        const clearWatchdog = () => {
-          if (watchdogTimer) {
-            clearTimeout(watchdogTimer);
-            watchdogTimer = null;
-          }
-        };
+        // Step 2 ("Routine scheduled, preparing spoken confirmation...") is clearly shown for 1s
+        // before transitioning into Step 3 ("Assistant speaking...")
+        setTimeout(() => {
+          if (!assistantOverlayOpenRef.current) return;
 
-        void speakText(baseMessage, {
-          token,
-          onStart: () => {
-            if (assistantPhaseRef.current === "responding") {
-              setIsTtsSpeaking(true);
-              clearWatchdog();
-              // Safety watchdog: measured strictly from when audio actually starts playing
-              const maxAudioWaitMs = Math.max(
-                5000,
-                estimateSpeechDurationMs(baseMessage) + 2500,
-              );
-              watchdogTimer = setTimeout(() => {
-                void stopSpeaking();
-                setIsTtsSpeaking(false);
-                setFollowUpWakeDetected(false);
-                setAssistantPhase("listening");
-                setAssistantLiveTranscript("");
-                wakeWordRef.current?.clearTranscript();
-                startAssistantIdleTimer();
-              }, maxAudioWaitMs);
+          let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+          const clearWatchdog = () => {
+            if (watchdogTimer) {
+              clearTimeout(watchdogTimer);
+              watchdogTimer = null;
             }
-          },
-          onDone: () => {
-            clearWatchdog();
-            setIsTtsSpeaking(false);
-            setFollowUpWakeDetected(false);
-            setAssistantPhase("listening");
-            setAssistantLiveTranscript("");
-            wakeWordRef.current?.clearTranscript();
-            startAssistantIdleTimer();
-          },
-          onStopped: () => {
-            clearWatchdog();
-            setIsTtsSpeaking(false);
-            setFollowUpWakeDetected(false);
-            setAssistantPhase("listening");
-            setAssistantLiveTranscript("");
-            wakeWordRef.current?.clearTranscript();
-            startAssistantIdleTimer();
-          },
-          onError: () => {
-            clearWatchdog();
-            setIsTtsSpeaking(false);
-            setFollowUpWakeDetected(false);
-            setAssistantPhase("listening");
-            startAssistantIdleTimer();
-          },
-        });
+          };
+
+          void speakText(baseMessage, {
+            token,
+            onStart: () => {
+              if (assistantPhaseRef.current === "responding") {
+                setIsTtsSpeaking(true);
+                clearWatchdog();
+                // Safety watchdog: measured strictly from when audio actually starts playing
+                const maxAudioWaitMs = Math.max(
+                  6000,
+                  estimateSpeechDurationMs(baseMessage) + 3000,
+                );
+                watchdogTimer = setTimeout(() => {
+                  void stopSpeaking();
+                  setIsTtsSpeaking(false);
+                  setFollowUpWakeDetected(false);
+                  setAssistantPhase("listening");
+                  setAssistantLiveTranscript("");
+                  wakeWordRef.current?.clearTranscript();
+                  startAssistantIdleTimer();
+                }, maxAudioWaitMs);
+              }
+            },
+            onDone: () => {
+              clearWatchdog();
+              setIsTtsSpeaking(false);
+              setFollowUpWakeDetected(false);
+              setAssistantPhase("listening");
+              setAssistantLiveTranscript("");
+              wakeWordRef.current?.clearTranscript();
+              startAssistantIdleTimer();
+            },
+            onStopped: () => {
+              clearWatchdog();
+              setIsTtsSpeaking(false);
+              setFollowUpWakeDetected(false);
+              setAssistantPhase("listening");
+              setAssistantLiveTranscript("");
+              wakeWordRef.current?.clearTranscript();
+              startAssistantIdleTimer();
+            },
+            onError: () => {
+              clearWatchdog();
+              setIsTtsSpeaking(false);
+              setFollowUpWakeDetected(false);
+              setAssistantPhase("listening");
+              startAssistantIdleTimer();
+            },
+          });
+        }, 1000);
       } else {
-        setIsTtsSpeaking(false);
-        setFollowUpWakeDetected(false);
-        setAssistantPhase("listening");
-        setAssistantLiveTranscript("");
-        wakeWordRef.current?.clearTranscript();
-        startAssistantIdleTimer();
+        setTimeout(() => {
+          if (!assistantOverlayOpenRef.current) return;
+          setIsTtsSpeaking(false);
+          setFollowUpWakeDetected(false);
+          setAssistantPhase("listening");
+          setAssistantLiveTranscript("");
+          wakeWordRef.current?.clearTranscript();
+          startAssistantIdleTimer();
+        }, 1200);
       }
     }
   }
@@ -770,7 +779,8 @@ export function HomeScreen() {
     mode: assistantOverlayOpen ? "conversation" : "wake",
     onWake: handleWakeDetected,
     onFollowUpWake: (_phrase) => {
-      if (assistantPhaseRef.current === "done") return;
+      // Never interrupt while assistant is thinking or speaking/responding
+      if (assistantPhaseRef.current !== "listening") return;
       void stopSpeaking();
       setIsTtsSpeaking(false);
       clearAssistantIdleTimer();

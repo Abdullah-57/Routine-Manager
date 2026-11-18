@@ -103,8 +103,8 @@ export async function speakText(
   let speechStartTime = 0;
 
   const estimatedDurationMs = estimateSpeechDurationMs(clean);
-  // Ensure polling NEVER fires before at least 70% of the speech duration has elapsed
-  const minRequiredDurationMs = Math.max(1400, Math.round(estimatedDurationMs * 0.70));
+  // Ensure polling NEVER fires before at least 85% of the speech duration has elapsed
+  const minRequiredDurationMs = Math.max(1600, Math.round(estimatedDurationMs * 0.85));
 
   const notifyStart = () => {
     if (finished || hasStarted) return;
@@ -177,6 +177,98 @@ export async function speakText(
     }
   };
 
+  const playAudioFallback = async () => {
+    if (finished) return;
+    try {
+      const baseUrl = getBaseUrl();
+      const tokenParam = options.token
+        ? `&token=${encodeURIComponent(options.token)}`
+        : "";
+      const ttsUrl = `${baseUrl}/routines/tts?text=${encodeURIComponent(clean)}${tokenParam}`;
+
+      const player = createAudioPlayer(ttsUrl, { downloadFirst: true });
+      activeAudioPlayer = player;
+      let hasStartedPlaying = false;
+      let scheduledAudioEnd = false;
+
+      player.addListener("playbackStatusUpdate", (status) => {
+        if (status.playing) {
+          hasStartedPlaying = true;
+          notifyStart();
+        }
+
+        if (status.duration && status.duration > 0 && !scheduledAudioEnd) {
+          scheduledAudioEnd = true;
+          const remainingMs = Math.max(
+            100,
+            Math.round(
+              (status.duration - (status.currentTime || 0)) * 1000,
+            ) + 60,
+          );
+          if (fallbackTimer) {
+            clearTimeout(fallbackTimer);
+          }
+          fallbackTimer = setTimeout(() => {
+            cleanupAndDone(false);
+          }, remainingMs);
+        }
+
+        const isEnded =
+          status.didJustFinish ||
+          status.playbackState === "ended" ||
+          (hasStartedPlaying && !status.playing) ||
+          (status.duration > 0 &&
+            status.currentTime >= status.duration - 0.2);
+
+        if (isEnded) {
+          cleanupAndDone(false);
+        }
+      });
+
+      player.play();
+
+      activePollInterval = setInterval(() => {
+        if (finished || !activeAudioPlayer) {
+          if (activePollInterval) {
+            clearInterval(activePollInterval);
+            activePollInterval = null;
+          }
+          return;
+        }
+        try {
+          const cur = activeAudioPlayer.currentTime;
+          const dur = activeAudioPlayer.duration;
+          const isPlaying = activeAudioPlayer.playing;
+          const status = activeAudioPlayer.currentStatus;
+
+          if (isPlaying) {
+            hasStartedPlaying = true;
+          }
+
+          if (
+            status?.didJustFinish ||
+            status?.playbackState === "ended" ||
+            (hasStartedPlaying && !isPlaying) ||
+            (dur > 0 && cur >= dur - 0.2)
+          ) {
+            cleanupAndDone(false);
+          }
+        } catch {
+          // ignore
+        }
+      }, 60);
+
+      return;
+    } catch (err) {
+      console.warn("[SpeechService] Audio player fallback failed:", err);
+      // Last resort: timer
+      notifyStart();
+      fallbackTimer = setTimeout(() => {
+        cleanupAndDone(false);
+      }, estimatedDurationMs);
+    }
+  };
+
   // 1. Primary: 100% free offline native TTS engine (AVSpeechSynthesizer / Android TextToSpeech)
   if (isTtsAvailable() && ExpoSpeechModule) {
     try {
@@ -185,7 +277,7 @@ export async function speakText(
       const speechOpts: SpeechOptions = {
         rate: options.rate ?? (Platform.OS === "ios" ? 0.95 : 1.0),
         pitch: options.pitch ?? 1.0,
-        language: options.language ?? "en-US",
+        ...(options.language ? { language: options.language } : {}),
         onStart: () => {
           notifyStart();
         },
@@ -197,20 +289,31 @@ export async function speakText(
         },
         onError: (err) => {
           console.warn("[SpeechService] Native speech error:", err);
-          cleanupAndDone(false);
+          if (!hasStarted) {
+            void playAudioFallback();
+          } else {
+            cleanupAndDone(false);
+          }
         },
       };
 
-      // Failsafe: if the device's native TTS engine doesn't emit onStart (rare on custom ROMs),
-      // trigger notifyStart after 900ms so UI and timers proceed smoothly
+      // If native TTS does not emit onStart within 1200ms, seamlessly fallback to audio player!
       activeStartFailsafeTimer = setTimeout(() => {
-        notifyStart();
-      }, 900);
+        if (!hasStarted && !finished) {
+          console.warn("[SpeechService] Native TTS did not start within 1200ms, falling back to audio player");
+          try {
+            ExpoSpeechModule?.stop();
+          } catch {
+            // ignore
+          }
+          void playAudioFallback();
+        }
+      }, 1200);
 
       ExpoSpeechModule.speak(clean, speechOpts);
 
       // Reliable polling: checks every 80ms strictly AFTER speech has actually started
-      // and min threshold has elapsed. Requires 4 consecutive false checks (320ms sustained silence)
+      // and min threshold has elapsed. Requires 8 consecutive false checks (640ms sustained silence)
       // so natural pauses between words or sentences are never cut off.
       activePollInterval = setInterval(async () => {
         if (finished) {
@@ -236,7 +339,7 @@ export async function speakText(
             const speaking = await ExpoSpeechModule.isSpeakingAsync();
             if (!speaking) {
               consecutiveFalseCount++;
-              if (consecutiveFalseCount >= 4) {
+              if (consecutiveFalseCount >= 8) {
                 cleanupAndDone(false);
               }
             } else {
@@ -262,114 +365,13 @@ export async function speakText(
         clearTimeout(fallbackTimer);
         fallbackTimer = null;
       }
-      if (finalWordTimer) {
-        clearTimeout(finalWordTimer);
-        finalWordTimer = null;
-      }
-      if (audioFlushTimer) {
-        clearTimeout(audioFlushTimer);
-        audioFlushTimer = null;
-      }
+      void playAudioFallback();
+      return;
     }
   }
 
-  // 2. Fallback: Backend TTS endpoint played via expo-audio (already present in the current dev APK)
-  try {
-    const baseUrl = getBaseUrl();
-    const tokenParam = options.token
-      ? `&token=${encodeURIComponent(options.token)}`
-      : "";
-    const ttsUrl = `${baseUrl}/routines/tts?text=${encodeURIComponent(clean)}${tokenParam}`;
-
-    const player = createAudioPlayer(ttsUrl, { downloadFirst: true });
-    activeAudioPlayer = player;
-    let hasStartedPlaying = false;
-    let scheduledAudioEnd = false;
-
-    player.addListener("playbackStatusUpdate", (status) => {
-      if (status.playing) {
-        hasStartedPlaying = true;
-        notifyStart();
-      }
-
-      if (status.duration && status.duration > 0 && !scheduledAudioEnd) {
-        scheduledAudioEnd = true;
-        const remainingMs = Math.max(
-          100,
-          Math.round(
-            (status.duration - (status.currentTime || 0)) * 1000,
-          ) + 60,
-        );
-        if (fallbackTimer) {
-          clearTimeout(fallbackTimer);
-        }
-        fallbackTimer = setTimeout(() => {
-          cleanupAndDone(false);
-        }, remainingMs);
-      }
-
-      // Check if finished via didJustFinish, playbackState "ended", or stopped playing
-      const isEnded =
-        status.didJustFinish ||
-        status.playbackState === "ended" ||
-        (hasStartedPlaying && !status.playing) ||
-        (status.duration > 0 &&
-          status.currentTime >= status.duration - 0.2);
-
-      if (isEnded) {
-        cleanupAndDone(false);
-      }
-    });
-
-    // Failsafe for network audio in case playback status is delayed
-    activeStartFailsafeTimer = setTimeout(() => {
-      notifyStart();
-    }, 4000);
-
-    player.play();
-
-    // Responsive 60ms polling on player position, playing flag, and playbackState
-    activePollInterval = setInterval(() => {
-      if (finished || !activeAudioPlayer) {
-        if (activePollInterval) {
-          clearInterval(activePollInterval);
-          activePollInterval = null;
-        }
-        return;
-      }
-      try {
-        const cur = activeAudioPlayer.currentTime;
-        const dur = activeAudioPlayer.duration;
-        const isPlaying = activeAudioPlayer.playing;
-        const status = activeAudioPlayer.currentStatus;
-
-        if (isPlaying) {
-          hasStartedPlaying = true;
-        }
-
-        if (
-          status?.didJustFinish ||
-          status?.playbackState === "ended" ||
-          (hasStartedPlaying && !isPlaying) ||
-          (dur > 0 && cur >= dur - 0.2)
-        ) {
-          cleanupAndDone(false);
-        }
-      } catch {
-        // ignore
-      }
-    }, 60);
-
-    return;
-  } catch (err) {
-    console.warn("[SpeechService] Audio player fallback failed:", err);
-  }
-
-  // 3. Visual duration fallback: Ensure equalizer soundwave animates even if all audio output fails
-  notifyStart();
-  fallbackTimer = setTimeout(() => {
-    cleanupAndDone(false);
-  }, estimatedDurationMs);
+  // 2. Fallback: Backend TTS endpoint played via expo-audio (if native module is absent)
+  await playAudioFallback();
 }
 
 /**

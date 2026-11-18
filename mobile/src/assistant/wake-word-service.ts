@@ -471,6 +471,11 @@ export function useWakeWord({
   useSafeSpeechRecognitionEvent("end", () => {
     isStartingRef.current = false;
 
+    if (!enabledRef.current) {
+      setIsListening(false);
+      return;
+    }
+
     // In conversation mode, if the user finished speaking and recognizer ended,
     // only commit if the text contains actual instructions beyond the wake word.
     if (modeRef.current === "conversation" && silenceDebounceRef.current) {
@@ -510,6 +515,9 @@ export function useWakeWord({
   useSafeSpeechRecognitionEvent(
     "result",
     (event: ExpoSpeechRecognitionResultEvent) => {
+      // Discard any incoming results while paused (e.g. during thinking/responding)
+      if (!enabledRef.current) return;
+
       const candidates = event?.results || [];
       if (candidates.length === 0) return;
 
@@ -561,9 +569,8 @@ export function useWakeWord({
           }
 
           // Case B: User spoke the wake phrase AND instruction together: "Hey Assistant gym at 7am"
-          if (wakeMatch && wakeMatch.trailingTranscript) {
-            onFollowUpWakeRef.current?.(wakeMatch.phraseMatched);
-          }
+          // We intentionally do NOT trigger onFollowUpWake here, as that would reset/abort speech playback.
+          // The instruction is stripped cleanly and dispatched to onTranscript/onUtteranceComplete below.
 
           // Strip any leading wake phrase (e.g. "hey assistant gym at 7am" -> "gym at 7am")
           const cleanUtterance = stripLeadingWakePhrase(
