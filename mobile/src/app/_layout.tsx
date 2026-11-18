@@ -12,6 +12,7 @@ import "react-native-reanimated";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
 import { AppButton } from "@/components/ui/app-button";
 import "@/notifications/handler";
+import { setupNotificationCategories } from "@/notifications/categories";
 import { useNotificationNavigation } from "@/notifications/use-notification-navigation";
 import { useRegisterPushToken } from "@/notifications/use-register-push-token";
 import { AppPreferencesProvider } from "@/preferences/app-preferences";
@@ -85,6 +86,10 @@ function RootNavigator() {
   useNotificationNavigation(isHydrated && !!token, isHydrated ? token : null);
   // Feature 6.2: save Expo push token on the backend after login / hydrate.
   useRegisterPushToken(isHydrated ? token : null);
+
+  useEffect(() => {
+    void setupNotificationCategories();
+  }, []);
 
   useEffect(() => {
     if (isHydrated) {

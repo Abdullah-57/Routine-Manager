@@ -6,15 +6,22 @@ import { markDispatchHandled, resolveDispatchId } from "./handler";
 
 function reminderIdFromData(data: unknown): string | null {
   if (!data || typeof data !== "object") return null;
-  const record = data as { reminderId?: unknown; url?: unknown };
+  const record = data as Record<string, unknown>;
 
   if (typeof record.reminderId === "string" && record.reminderId.length > 0) {
     return record.reminderId;
+  }
+  if (typeof record.id === "string" && record.id.length > 0) {
+    return record.id;
   }
 
   // Fallback: parse /reminder/<id> from deep link payloads
   if (typeof record.url === "string") {
     const match = record.url.match(/reminder\/([^/?#]+)/i);
+    if (match?.[1]) return match[1];
+  }
+  if (typeof record.deepLink === "string") {
+    const match = record.deepLink.match(/reminder\/([^/?#]+)/i);
     if (match?.[1]) return match[1];
   }
 
@@ -37,19 +44,22 @@ function openReminder(reminderId: string) {
 }
 
 /**
- * Tap a local notification → open that reminder.
+ * Tap a notification body → open that reminder.
  * Queues the target until auth/router are ready (cold start / background).
+ *
+ * Interactive action buttons (Mark done, Snooze 10m, Join meeting) are handled
+ * silently in the background by handler.ts without opening the app.
  */
 export function useNotificationNavigation(
   ready: boolean,
   authToken?: string | null,
 ) {
   const pendingIdRef = useRef<string | null>(null);
-  const handledIdsRef = useRef(new Set<string>());
-  const authTokenRef = useRef(authToken);
+  const handledResponsesRef = useRef(new Set<string>());
+  const authTokenRef = useRef<string | null>(authToken ?? null);
 
   useEffect(() => {
-    authTokenRef.current = authToken;
+    authTokenRef.current = authToken ?? null;
   }, [authToken]);
 
   useEffect(() => {
@@ -71,12 +81,25 @@ export function useNotificationNavigation(
       if (!response) return;
 
       const notifId = response.notification.request.identifier;
-      if (handledIdsRef.current.has(notifId)) return;
+      const actionId = response.actionIdentifier;
+      const responseKey = `${notifId}:${actionId}`;
+
+      // Prevent duplicate processing
+      if (handledResponsesRef.current.has(responseKey)) return;
+      handledResponsesRef.current.add(responseKey);
+
+      // Interactive action buttons (Mark done, Snooze 10m, Join meeting) are
+      // handled in handler.ts without navigating into the app.
+      if (
+        actionId &&
+        actionId !== Notifications.DEFAULT_ACTION_IDENTIFIER &&
+        actionId !== "expo.modules.notifications.actions.DEFAULT"
+      ) {
+        return;
+      }
 
       const reminderId = reminderIdFromResponse(response);
       if (!reminderId) return;
-
-      handledIdsRef.current.add(notifId);
 
       // Record dispatchId so delayed remote pushes are suppressed, and notify backend
       const resolved = resolveDispatchId(response.notification.request.content.data);

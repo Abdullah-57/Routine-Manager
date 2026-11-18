@@ -8,6 +8,7 @@ import { dispatchDueReminders } from "../services/scheduler";
 const testSchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
   body: z.string().trim().min(1).max(200).optional(),
+  categoryId: z.string().trim().optional(),
 });
 
 export const notificationsRouter = Router();
@@ -43,10 +44,16 @@ notificationsRouter.post("/test", requireAuth, async (req, res) => {
     "Remote push works — your backend reached this phone via Expo Push.";
 
   try {
-    const result = await sendExpoPush(tokens, title, body, {
-      type: "test",
-      screen: "home",
-    });
+    const result = await sendExpoPush(
+      tokens,
+      title,
+      body,
+      {
+        type: "test",
+        screen: "home",
+      },
+      parsed.data.categoryId,
+    );
 
     return res.status(200).json({
       ok: result.sent > 0,

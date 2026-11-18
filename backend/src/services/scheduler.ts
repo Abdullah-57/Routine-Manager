@@ -120,16 +120,23 @@ export async function dispatchDueReminders(targetNow?: Date): Promise<DispatchRe
         }
       }
 
+      const kind = reminder.kind || "simple";
+      const categoryId = kind === "meeting" ? "meeting" : kind === "call" ? "call" : "simple";
+      const meetLink = reminder.action?.meetLink ?? null;
+      const joinUrl = meetLink;
+
       const data: Record<string, unknown> = {
         reminderId: reminder._id.toString(),
+        kind,
         screen: "reminder",
         url: `/reminder/${reminder._id.toString()}`,
         deepLink: `routine-manager://reminder/${reminder._id.toString()}`,
+        joinUrl,
+        meetLink,
         isPreAlert,
         leadTimeMinutes: leadTime,
         dispatchId: `${reminder._id.toString()}:${leadTime}`,
         source: "server_dispatch",
-        meetLink: reminder.action?.meetLink ?? null,
       };
 
       let sentCount = 0;
@@ -137,7 +144,7 @@ export async function dispatchDueReminders(targetNow?: Date): Promise<DispatchRe
 
       if (tokens.length > 0) {
         try {
-          const pushResult = await sendExpoPush(tokens, title, body, data);
+          const pushResult = await sendExpoPush(tokens, title, body, data, categoryId);
           sentCount = pushResult.sent;
           errors.push(...pushResult.errors);
         } catch (pushErr) {

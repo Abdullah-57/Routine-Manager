@@ -4,6 +4,7 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { syncLocallyScheduledTokensWithBackend } from "@/api/reminders";
 import { tokenStorage } from "@/auth/token-storage";
+import { resolveNotificationCategory, setupNotificationCategories } from "./categories";
 import { getCachedPushToken } from "./register-push-token";
 
 const MAP_KEY = "reminderLocalNotificationIds.v1";
@@ -106,6 +107,7 @@ export async function ensureAndroidRemindersChannel() {
     5;
 
   try {
+    await setupNotificationCategories();
     await Notifications.setNotificationChannelAsync(REMINDERS_CHANNEL_ID, {
       name: "Reminders",
       importance,
@@ -295,6 +297,11 @@ async function scheduleReminderLocalNotificationInternal(
     const androidChannel =
       Platform.OS === "android" ? { channelId: REMINDERS_CHANNEL_ID } : {};
 
+    const kind = reminder.kind || "simple";
+    const categoryIdentifier = resolveNotificationCategory(kind);
+    const meetLink = reminder.action?.meetLink ?? null;
+    const joinUrl = meetLink;
+
     const scheduledIds: string[] = [];
     const now = Date.now();
 
@@ -328,15 +335,21 @@ async function scheduleReminderLocalNotificationInternal(
           title: reminder.title || "Reminder",
           subtitle: `Heads-up · In ${durationText}`,
           body: preBody,
+          categoryIdentifier,
+          autoDismiss: true,
           data: {
             reminderId: reminder.id,
+            title: reminder.title,
+            notes: reminder.notes ?? null,
+            kind,
             screen: "reminder",
             url: `/reminder/${reminder.id}`,
             deepLink,
+            joinUrl,
+            meetLink,
             isPreAlert: true,
             leadTimeMinutes: mins,
             dispatchId: `${reminder.id}:${mins}`,
-            meetLink: reminder.action?.meetLink ?? null,
           },
           sound: true,
           ...androidChannel,
@@ -375,28 +388,44 @@ async function scheduleReminderLocalNotificationInternal(
     // 2. Schedule Main Event Notification at startAt
     const msUntilMain = startMs - now;
     if (msUntilMain > 1500) {
-      const mainBody = reminder.notes?.trim()
-        ? reminder.notes.trim()
-        : reminder.kind === "meeting"
-          ? "Your meeting is starting now."
-          : reminder.kind === "call"
-            ? "Your call is starting now."
-            : "It's time for this routine item.";
+      let mainBody = "";
+      if (reminder.kind === "meeting") {
+        mainBody = "Your meeting is starting now.";
+      } else if (reminder.kind === "call") {
+        mainBody = "Your call is starting now.";
+      } else {
+        mainBody = reminder.notes?.trim() || "It's time for this routine item.";
+      }
+      if (reminder.notes?.trim() && (reminder.kind === "meeting" || reminder.kind === "call")) {
+        mainBody += `\n${reminder.notes.trim()}`;
+      }
 
       const useIntervalMain = msUntilMain <= 60 * 60 * 1000;
       const mainIdentifier = await Notifications.scheduleNotificationAsync({
         content: {
           title: reminder.title || "Reminder",
-          subtitle: reminder.kind === "meeting" ? "Meeting · Starts Now" : "Starts Now",
+          subtitle:
+            reminder.kind === "meeting"
+              ? "Meeting · Starts Now"
+              : reminder.kind === "call"
+                ? "Call · Starts Now"
+                : "Starts Now",
           body: mainBody,
+          categoryIdentifier,
+          autoDismiss: true,
           data: {
             reminderId: reminder.id,
+            title: reminder.title,
+            notes: reminder.notes ?? null,
+            kind,
             screen: "reminder",
             url: `/reminder/${reminder.id}`,
             deepLink,
+            joinUrl,
+            meetLink,
             isPreAlert: false,
+            leadTimeMinutes: 0,
             dispatchId: `${reminder.id}:0`,
-            meetLink: reminder.action?.meetLink ?? null,
           },
           sound: true,
           ...androidChannel,

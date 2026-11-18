@@ -1,8 +1,19 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
-import { Platform } from "react-native";
-import { acknowledgeReminderDispatch } from "@/api/reminders";
+import { AppState, BackHandler, Platform, ToastAndroid } from "react-native";
+import { acknowledgeReminderDispatch, updateReminder } from "@/api/reminders";
 import { tokenStorage } from "@/auth/token-storage";
+import {
+  NOTIFICATION_ACTIONS,
+  NOTIFICATION_CATEGORIES,
+  resolveNotificationCategory,
+  setupNotificationCategories,
+} from "./categories";
+import {
+  cancelReminderLocalNotification,
+  REMINDERS_CHANNEL_ID,
+} from "./local-reminders";
 
 const HANDLED_DISPATCHES_KEY = "handledReminderDispatches.v1";
 const DEDUPE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes for exact alert matches
@@ -14,8 +25,9 @@ const handledDispatches = new Map<string, number>();
 /** In-memory cache of reminderId -> last alert timestamp (ms) to catch local vs push duplicate races */
 const recentReminderAlerts = new Map<string, number>();
 
-// Load persisted handled dispatches on startup
+// Load persisted handled dispatches and setup notification categories on startup
 if (Platform.OS !== "web") {
+  void setupNotificationCategories();
   void AsyncStorage.getItem(HANDLED_DISPATCHES_KEY)
     .then((raw) => {
       if (!raw) return;
@@ -205,5 +217,214 @@ if (Platform.OS !== "web") {
     } catch {
       // Non-fatal
     }
+  });
+
+  // Cache to ensure each notification action button click is processed exactly once
+  const handledActionResponses = new Set<string>();
+
+  async function handleNotificationActionResponse(
+    response: Notifications.NotificationResponse | null | undefined,
+  ) {
+    if (!response) return;
+
+    const actionId = response.actionIdentifier;
+    const notifId = response.notification?.request?.identifier || "unknown";
+
+    // Skip default notification body tap (handled by useNotificationNavigation to open reminder screen)
+    if (
+      !actionId ||
+      actionId === Notifications.DEFAULT_ACTION_IDENTIFIER ||
+      actionId === "expo.modules.notifications.actions.DEFAULT"
+    ) {
+      return;
+    }
+
+    const responseKey = `${notifId}:${actionId}`;
+    if (handledActionResponses.has(responseKey)) {
+      return;
+    }
+    handledActionResponses.add(responseKey);
+    if (handledActionResponses.size > 50) {
+      const firstKey = handledActionResponses.keys().next().value;
+      if (firstKey) handledActionResponses.delete(firstKey);
+    }
+
+    try {
+      // 1. Dismiss notification from status bar
+      if (notifId && notifId !== "unknown") {
+        try {
+          await Notifications.dismissNotificationAsync(notifId);
+        } catch {
+          // Ignore
+        }
+      }
+      void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+
+      const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
+      const resolved = resolveDispatchId(data);
+      const reminderId =
+        resolved?.reminderId ||
+        (typeof data.reminderId === "string" ? data.reminderId : null) ||
+        (typeof data.id === "string" ? data.id : null);
+
+      if (resolved) {
+        markDispatchHandled(resolved.reminderId, resolved.leadTime);
+      } else if (reminderId) {
+        markDispatchHandled(reminderId, 0);
+      }
+
+      // 2. "Mark done" action
+      if (
+        actionId === NOTIFICATION_ACTIONS.MARK_DONE ||
+        actionId === "mark_done" ||
+        actionId === "done"
+      ) {
+        if (reminderId) {
+          await cancelReminderLocalNotification(reminderId);
+          const token = await tokenStorage.getToken();
+          if (token) {
+            await updateReminder(token, reminderId, { status: "completed" });
+          }
+        }
+        if (Platform.OS === "android") {
+          ToastAndroid.show("Marked as done", ToastAndroid.SHORT);
+          setTimeout(() => {
+            BackHandler.exitApp();
+          }, 300);
+        }
+        return;
+      }
+
+      // 3. "Snooze 10m" action
+      if (
+        actionId === NOTIFICATION_ACTIONS.SNOOZE_10 ||
+        actionId === "snooze_10" ||
+        actionId === "snooze"
+      ) {
+        const title =
+          response.notification.request.content.title ||
+          (typeof data.title === "string" ? data.title : "Reminder");
+        const kind = typeof data.kind === "string" ? data.kind : "simple";
+        const categoryIdentifier = resolveNotificationCategory(kind);
+        const snoozeDispatchId = `${reminderId || "snooze"}:snooze_${Date.now()}`;
+        const androidChannel =
+          Platform.OS === "android" ? { channelId: REMINDERS_CHANNEL_ID } : {};
+
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title,
+              subtitle: "Snoozed · 10m",
+              body: `Snooze alert: ${title}`,
+              categoryIdentifier,
+              autoDismiss: true,
+              data: {
+                ...data,
+                reminderId: reminderId || "snooze",
+                isSnoozed: true,
+                dispatchId: snoozeDispatchId,
+              },
+              sound: true,
+              ...androidChannel,
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+              seconds: 10 * 60,
+              repeats: false,
+              ...(Platform.OS === "android" ? { channelId: REMINDERS_CHANNEL_ID } : {}),
+            },
+          });
+        } catch (snoozeErr) {
+          if (__DEV__) {
+            console.warn("Failed to schedule snooze:", snoozeErr);
+          }
+        }
+
+        if (Platform.OS === "android") {
+          ToastAndroid.show("Snoozed for 10 minutes", ToastAndroid.SHORT);
+          setTimeout(() => {
+            BackHandler.exitApp();
+          }, 400);
+        }
+        return;
+      }
+
+      // 4. "Join meeting" action
+      if (
+        actionId === NOTIFICATION_ACTIONS.JOIN_MEETING ||
+        actionId === "join" ||
+        actionId === "join_meeting"
+      ) {
+        const actionObj =
+          data.action && typeof data.action === "object"
+            ? (data.action as Record<string, unknown>)
+            : null;
+
+        const rawLink =
+          (typeof data.meetLink === "string" && data.meetLink.trim()) ||
+          (typeof data.joinUrl === "string" && data.joinUrl.trim()) ||
+          (actionObj && typeof actionObj.meetLink === "string" && actionObj.meetLink.trim()) ||
+          (typeof data.notes === "string" && data.notes.match(/https?:\/\/[^\s]+/i)?.[0]) ||
+          null;
+
+        const title =
+          response.notification.request.content.title ||
+          (typeof data.title === "string" ? data.title : "Meeting");
+        const cleanRoom = (title || "Meeting").replace(/[^a-zA-Z0-9]/g, "");
+        const targetUrl =
+          rawLink || `https://meet.jit.si/RoutineApp-${cleanRoom || "Room"}-${reminderId || "live"}`;
+
+        let finalUrl = targetUrl.trim();
+        if (!/^https?:\/\//i.test(finalUrl)) {
+          finalUrl = `https://${finalUrl}`;
+        }
+
+        if (Platform.OS === "android") {
+          ToastAndroid.show("Opening meeting...", ToastAndroid.SHORT);
+        }
+
+        try {
+          await Linking.openURL(finalUrl);
+        } catch (err) {
+          if (__DEV__) {
+            console.warn("Failed to open meeting URL:", err);
+          }
+          if (Platform.OS === "android") {
+            ToastAndroid.show("Could not open meeting link", ToastAndroid.SHORT);
+          }
+        }
+
+        if (Platform.OS === "android") {
+          setTimeout(() => {
+            BackHandler.exitApp();
+          }, 500);
+        }
+        return;
+      }
+    } catch (err) {
+      if (__DEV__) {
+        console.warn("Error in notification action response listener:", err);
+      }
+    }
+  }
+
+  // Register listeners for both foreground/background events and cold starts
+  Notifications.addNotificationResponseReceivedListener((response) => {
+    void handleNotificationActionResponse(response);
+  });
+
+  void Notifications.getLastNotificationResponseAsync().then((response) => {
+    if (response) {
+      void handleNotificationActionResponse(response);
+    }
+  });
+
+  AppState.addEventListener("change", (state) => {
+    if (state !== "active") return;
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) {
+        void handleNotificationActionResponse(response);
+      }
+    });
   });
 }

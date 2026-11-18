@@ -14,6 +14,7 @@ export type ExpoPushMessage = {
   data?: Record<string, unknown>;
   sound?: "default" | null;
   channelId?: string;
+  categoryId?: string;
 };
 
 export type ExpoPushTicket = {
@@ -44,6 +45,7 @@ export async function sendExpoPush(
   title: string,
   body: string,
   data: Record<string, unknown> = {},
+  categoryId?: string,
 ): Promise<SendExpoPushResult> {
   const unique = [...new Set(tokens.map((t) => t.trim()).filter(Boolean))];
   const valid = unique.filter(isExpoPushToken);
@@ -59,15 +61,21 @@ export async function sendExpoPush(
     return { tickets: [], sent: 0, errors: errors.length ? errors : ["No valid Expo push tokens"] };
   }
 
-  const messages: ExpoPushMessage[] = valid.map((to) => ({
-    to,
-    title,
-    body,
-    data,
-    sound: "default",
-    // Matches the Android channel created in the mobile app (Feature 6.1).
-    channelId: "reminders",
-  }));
+  const messages: ExpoPushMessage[] = valid.map((to) => {
+    const msg: ExpoPushMessage = {
+      to,
+      title,
+      body,
+      data,
+      sound: "default",
+      // Matches the Android channel created in the mobile app (Feature 6.1).
+      channelId: "reminders",
+    };
+    if (categoryId) {
+      msg.categoryId = categoryId;
+    }
+    return msg;
+  });
 
   const headers: Record<string, string> = {
     Accept: "application/json",
