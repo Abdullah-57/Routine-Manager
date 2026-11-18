@@ -4,10 +4,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Linking,
   Pressable,
-  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -18,9 +16,9 @@ import { ApiError, pingHealth } from "@/api/client";
 import { sendTestPush } from "@/api/notifications";
 import { listReminders, type ReminderSummary } from "@/api/reminders";
 import { useAuth } from "@/auth/AuthContext";
+import { DayTimeline } from "@/components/day-timeline";
 import { HomeSidebar } from "@/components/home-sidebar";
 import { MonthCalendar } from "@/components/month-calendar";
-import { StatusBadge } from "@/components/status-badge";
 import { FeedbackBanner } from "@/components/ui/feedback-banner";
 import { ThemedText } from "@/components/ui/themed-text";
 import {
@@ -79,77 +77,8 @@ function avatarLetter(user: {
   return name.charAt(0).toUpperCase() || "R";
 }
 
-function AgendaRow({
-  id,
-  title,
-  timeLabel,
-  notes,
-  status,
-  kind,
-  meetLink,
-  onPressId,
-}: {
-  id: string;
-  title: string;
-  timeLabel: string;
-  notes: string;
-  status: string;
-  kind?: string;
-  meetLink?: string | null;
-  onPressId: (id: string) => void;
-}) {
-  const isMeeting = kind === "meeting" || Boolean(meetLink);
-  const isCall = kind === "call";
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={() => onPressId(id)}
-      style={({ pressed }) => [
-        styles.agendaRow,
-        pressed ? styles.agendaRowPressed : null,
-      ]}
-    >
-      <ThemedText variant="headline" style={styles.agendaTime}>
-        {timeLabel}
-      </ThemedText>
-      <View style={styles.agendaBody}>
-        <View style={styles.agendaTitleRow}>
-          <View style={styles.agendaTitleGroup}>
-            {isMeeting ? <Text style={styles.agendaKindIcon}>🎥</Text> : null}
-            {isCall ? <Text style={styles.agendaKindIcon}>📞</Text> : null}
-            <ThemedText variant="headline" style={styles.agendaTitle} numberOfLines={1}>
-              {title}
-            </ThemedText>
-          </View>
-          <View style={styles.agendaBadgeGroup}>
-            {isMeeting ? (
-              <View style={styles.agendaMeetBadge}>
-                <Text style={styles.agendaMeetBadgeText}>Meet</Text>
-              </View>
-            ) : null}
-            <StatusBadge status={status} />
-          </View>
-        </View>
-        {notes ? (
-          <ThemedText
-            variant="caption"
-            numberOfLines={2}
-            style={styles.agendaNotes}
-          >
-            {notes}
-          </ThemedText>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
-
 /**
- * Friendly empty/error card for the agenda list. One component covers all
- * three list states so the tone stays consistent: loading spinner, "couldn't
- * load" (with retry) and "nothing scheduled". FadeIn is opacity-only so it
- * never triggers a layout pass (Reanimated, UI thread).
+ * Friendly empty/error card for list/calendar states.
  */
 function EmptyStateCard({
   icon,
@@ -208,6 +137,7 @@ export function CalendarScreen() {
   const [testPush, setTestPush] = useState<TestPushState>({ status: "idle" });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isCalendarCollapsed, setIsCalendarCollapsed] = useState(false);
   // Double-submit guard: focus effect, pull-to-refresh and the Retry button
   // all trigger fetchMonth — never let two fetches overlap.
   const fetchInFlightRef = useRef(false);
@@ -402,128 +332,144 @@ export function CalendarScreen() {
     await prefs.setPushNotificationsEnabled(value);
   }
 
-  const listHeader = (
-    <View style={styles.header}>
-      <View style={styles.topRow}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open settings sidebar"
-          onPress={() => setSidebarOpen(true)}
-          style={({ pressed }) => [
-            styles.avatar,
-            pressed ? styles.pressed : null,
-          ]}
-        >
-          <Text style={styles.avatarLetter}>{avatarLetter(user)}</Text>
-        </Pressable>
-
-        <View style={styles.welcomeBlock}>
-          <Text style={styles.welcomeEyebrow}>Routine Manager</Text>
-          <Text style={styles.welcomeTitle}>
-            Welcome {welcomeName(user)}
-          </Text>
-        </View>
-      </View>
-
-      <MonthCalendar
-        year={visibleMonth.year}
-        month={visibleMonth.month}
-        selectedDate={selectedDate}
-        markedDates={markedDates}
-        onSelectDate={setSelectedDate}
-        onChangeMonth={(year, month) => {
-          setVisibleMonth({ year, month });
-          // Keep selection inside the new month when possible
-          const day = Number(selectedDate.split("-")[2] || "1");
-          const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-          const clamped = Math.min(day, daysInMonth);
-          setSelectedDate(
-            `${year}-${String(month).padStart(2, "0")}-${String(clamped).padStart(2, "0")}`,
-          );
-        }}
-      />
-
-      <ThemedText variant="title" style={styles.sectionTitle}>
-        Agenda · {selectedDate}
-      </ThemedText>
-
-      {/* When the selected day has rows, the banner owns the retry; when the
-          day is empty, the empty-state card in the list owns it instead. */}
-      {load.status === "error" && dayReminders.length > 0 ? (
-        <FeedbackBanner
-          tone="error"
-          title="Could not refresh"
-          body={load.message}
-          actionLabel="Retry"
-          onAction={retryFetchMonth}
-        />
-      ) : null}
-    </View>
-  );
+  const isSelectedToday = selectedDate === todayDateKey(timezone);
 
   return (
     <View style={styles.root}>
       <View style={styles.headerGlow} pointerEvents="none" />
 
-      <FlatList
-        data={dayReminders}
-        keyExtractor={(item) => item.id}
-        style={styles.list}
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingTop: insets.top + spacing.md },
-        ]}
-        ListHeaderComponent={listHeader}
-        refreshControl={
-          <RefreshControl
-            refreshing={load.status === "refreshing"}
-            onRefresh={retryFetchMonth}
-            tintColor="#1D4ED8"
-            colors={["#2563EB"]}
+      {/* Top Header & Calendar Section */}
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.topRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open settings sidebar"
+            onPress={() => setSidebarOpen(true)}
+            style={({ pressed }) => [
+              styles.avatar,
+              pressed ? styles.pressed : null,
+            ]}
+          >
+            <Text style={styles.avatarLetter}>{avatarLetter(user)}</Text>
+          </Pressable>
+
+          <View style={styles.welcomeBlock}>
+            <Text style={styles.welcomeEyebrow}>Routine Manager</Text>
+            <Text style={styles.welcomeTitle}>
+              Welcome {welcomeName(user)}
+            </Text>
+          </View>
+        </View>
+
+        {!isCalendarCollapsed ? (
+          <MonthCalendar
+            year={visibleMonth.year}
+            month={visibleMonth.month}
+            selectedDate={selectedDate}
+            markedDates={markedDates}
+            onSelectDate={setSelectedDate}
+            onChangeMonth={(year, month) => {
+              setVisibleMonth({ year, month });
+              // Keep selection inside the new month when possible
+              const day = Number(selectedDate.split("-")[2] || "1");
+              const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+              const clamped = Math.min(day, daysInMonth);
+              setSelectedDate(
+                `${year}-${String(month).padStart(2, "0")}-${String(clamped).padStart(2, "0")}`,
+              );
+            }}
           />
-        }
-        ListEmptyComponent={
-          load.status === "loading" ? (
-            <ActivityIndicator color="#1D4ED8" style={styles.emptySpinner} />
-          ) : load.status === "error" ? (
-            <EmptyStateCard
-              icon="⚠️"
-              title="Couldn't load this day"
-              body="The calendar couldn't reach the server. Check your connection, then try again."
-              actionLabel="Try again"
-              onAction={retryFetchMonth}
-            />
-          ) : (
-            <EmptyStateCard
-              icon="🗓️"
-              title="Nothing scheduled"
-              body="No reminders on this day. Create some from Home, then pull to refresh."
-            />
-          )
-        }
-        renderItem={({ item }) => {
-          // Must match Home: format in the reminder's own timezone, not only account/device.
-          // Otherwise 15:00 Asia/Karachi can show as 13:00 on a UTC+3 phone.
-          const reminderTz = item.timezone || timezone;
-          return (
-            <AgendaRow
-              id={item.id}
-              title={item.title}
-              notes={item.notes}
-              status={item.status}
-              kind={item.kind}
-              meetLink={item.action?.meetLink}
-              timeLabel={formatTimeOnly(
-                item.startAt,
-                reminderTz,
-                prefs.use24HourClock,
-              )}
-              onPressId={onPressReminder}
-            />
-          );
-        }}
-      />
+        ) : null}
+
+        {/* Timeline Header Row with Title, Event Count, Today jump, and Calendar toggle */}
+        <View style={styles.timelineHeaderRow}>
+          <View style={styles.timelineTitleGroup}>
+            <ThemedText variant="title" style={styles.sectionTitle}>
+              {selectedDate}
+            </ThemedText>
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>
+                {dayReminders.length === 0
+                  ? "0 events"
+                  : `${dayReminders.length} event${dayReminders.length > 1 ? "s" : ""}`}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.timelineActions}>
+            {!isSelectedToday ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Jump to today"
+                onPress={() => {
+                  const today = todayDateKey(timezone);
+                  setSelectedDate(today);
+                  const [y, m] = today.split("-").map(Number);
+                  setVisibleMonth({ year: y, month: m });
+                }}
+                style={({ pressed }) => [
+                  styles.todayBtn,
+                  pressed ? styles.pressed : null,
+                ]}
+              >
+                <Text style={styles.todayBtnText}>Today</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isCalendarCollapsed ? "Show month calendar" : "Hide month calendar"}
+              onPress={() => setIsCalendarCollapsed((prev) => !prev)}
+              style={({ pressed }) => [
+                styles.collapseBtn,
+                pressed ? styles.pressed : null,
+              ]}
+            >
+              <Text style={styles.collapseBtnText}>
+                {isCalendarCollapsed ? "Show Month ▼" : "Hide Month ▲"}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {load.status === "error" && dayReminders.length > 0 ? (
+          <FeedbackBanner
+            tone="error"
+            title="Could not refresh"
+            body={load.message}
+            actionLabel="Retry"
+            onAction={retryFetchMonth}
+          />
+        ) : null}
+      </View>
+
+      {/* Main 24-Hour Timeline */}
+      <View style={styles.timelineContainer}>
+        {load.status === "error" && monthReminders.length === 0 ? (
+          <EmptyStateCard
+            icon="⚠️"
+            title="Couldn't load calendar"
+            body="The calendar couldn't reach the server. Check your connection, then try again."
+            actionLabel="Try again"
+            onAction={retryFetchMonth}
+          />
+        ) : load.status === "loading" && monthReminders.length === 0 ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#1D4ED8" size="large" />
+            <Text style={styles.loadingText}>Loading calendar...</Text>
+          </View>
+        ) : (
+          <DayTimeline
+            dateKey={selectedDate}
+            reminders={dayReminders}
+            timezone={timezone}
+            use24HourClock={prefs.use24HourClock}
+            onPressReminder={onPressReminder}
+            onRefresh={retryFetchMonth}
+            refreshing={load.status === "refreshing"}
+          />
+        )}
+      </View>
 
       <HomeSidebar
         visible={sidebarOpen}
@@ -586,15 +532,9 @@ const styles = StyleSheet.create({
       linear-gradient(180deg, rgba(147, 197, 253, 0.55) 0%, rgba(59, 130, 246, 0.18) 55%, rgba(255, 255, 255, 0) 100%)
     `,
   },
-  list: {
-    flex: 1,
-  },
-  listContent: {
-    paddingBottom: spacing.xxl,
-  },
   header: {
     paddingHorizontal: spacing.md,
-    gap: spacing.sm + 2,
+    gap: spacing.sm,
   },
   topRow: {
     flexDirection: "row",
@@ -633,71 +573,75 @@ const styles = StyleSheet.create({
     color: "#0F172A",
   },
   sectionTitle: {
-    marginTop: spacing.sm,
     color: "#1E3A8A",
   },
-  agendaRow: {
-    marginHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    flexDirection: "row",
-    gap: spacing.sm + 4,
-    padding: spacing.md - 2,
-    borderRadius: radius.md,
-    borderCurve: "continuous",
-    backgroundColor: "rgba(37, 99, 235, 0.05)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(37, 99, 235, 0.12)",
-  },
-  agendaRowPressed: {
-    backgroundColor: "rgba(37, 99, 235, 0.12)",
-  },
-  agendaTime: {
-    width: 72,
-    color: "#1D4ED8",
-  },
-  agendaBody: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  agendaTitleRow: {
+  timelineHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginTop: spacing.xs,
+    paddingVertical: 4,
+  },
+  timelineTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
   },
-  agendaTitleGroup: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  agendaKindIcon: {
-    fontSize: 16,
-  },
-  agendaTitle: {
-    flex: 1,
-    color: "#0F172A",
-  },
-  agendaBadgeGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  agendaMeetBadge: {
-    backgroundColor: "rgba(22, 163, 74, 0.12)",
-    paddingHorizontal: 7,
+  countBadge: {
+    paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(22, 163, 74, 0.3)",
+    backgroundColor: "rgba(37, 99, 235, 0.1)",
   },
-  agendaMeetBadgeText: {
-    fontSize: 11,
+  countBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
+  timelineActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  todayBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.2)",
+  },
+  todayBtnText: {
+    fontSize: 12,
     fontWeight: "700",
-    color: "#15803D",
+    color: "#2563EB",
   },
-  agendaNotes: {
+  collapseBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    backgroundColor: "#F1F5F9",
+  },
+  collapseBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  timelineContainer: {
+    flex: 1,
+    marginTop: spacing.xs,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xxl,
+  },
+  loadingText: {
+    fontSize: 14,
     color: "#64748B",
+    fontWeight: "500",
   },
   emptyCard: {
     marginHorizontal: spacing.md,

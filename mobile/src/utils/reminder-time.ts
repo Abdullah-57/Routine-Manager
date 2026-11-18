@@ -189,3 +189,36 @@ export function fromLocalDateTimeInput(
   if (Number.isNaN(parsed.getTime())) return null;
   return iso;
 }
+
+/**
+ * Returns the { hour, minute } (0-23 and 0-59) of an instant in the specified timezone.
+ */
+export function getHourAndMinuteInTimezone(
+  isoOrDate: string | Date,
+  timezone: string,
+): { hour: number; minute: number } {
+  const date = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  if (Number.isNaN(date.getTime())) {
+    return { hour: 0, minute: 0 };
+  }
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23",
+      hour12: false,
+    }).formatToParts(date);
+
+    let hour = 0;
+    let minute = 0;
+    for (const p of parts) {
+      if (p.type === "hour") hour = parseInt(p.value, 10);
+      if (p.type === "minute") minute = parseInt(p.value, 10);
+    }
+    if (hour === 24) hour = 0;
+    return { hour, minute };
+  } catch {
+    return { hour: date.getHours(), minute: date.getMinutes() };
+  }
+}
