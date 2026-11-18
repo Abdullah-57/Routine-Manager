@@ -28,18 +28,42 @@ function reminderIdFromData(data: unknown): string | null {
   return null;
 }
 
-function reminderIdFromResponse(
+type NavigationTarget = {
+  reminderId: string;
+  action?: string;
+};
+
+function reminderTargetFromResponse(
   response: Notifications.NotificationResponse | null,
-): string | null {
+): NavigationTarget | null {
   if (!response) return null;
-  return reminderIdFromData(response.notification.request.content.data);
+  const data = response.notification.request.content.data;
+  const reminderId = reminderIdFromData(data);
+  if (!reminderId) return null;
+
+  let action: string | undefined;
+  if (data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+    const hasMeetLink = Boolean(
+      (typeof record.meetLink === "string" && record.meetLink.trim()) ||
+      (typeof record.joinUrl === "string" && record.joinUrl.trim()) ||
+      record.kind === "meeting" ||
+      (typeof record.url === "string" && record.url.includes("action=join")) ||
+      (typeof record.deepLink === "string" && record.deepLink.includes("action=join"))
+    );
+    if (hasMeetLink) {
+      action = "join";
+    }
+  }
+
+  return { reminderId, action };
 }
 
-function openReminder(reminderId: string) {
+function openReminder(reminderId: string, action?: string) {
   // Imperative router works from root once navigation tree is mounted.
   router.push({
     pathname: "/reminder/[id]",
-    params: { id: reminderId },
+    params: action ? { id: reminderId, action } : { id: reminderId },
   });
 }
 
@@ -47,14 +71,17 @@ function openReminder(reminderId: string) {
  * Tap a notification body → open that reminder.
  * Queues the target until auth/router are ready (cold start / background).
  *
- * Interactive action buttons (Mark done, Snooze 10m, Join meeting) are handled
- * silently in the background by handler.ts without opening the app.
+ * Feature 4.2 Tap routing:
+ * - Default tap with meetLink / meeting kind → routes to /reminder/[id]?action=join (Pre-Meeting screen)
+ * - Default tap on simple reminder → routes to /reminder/[id] (Detail screen)
+ * - Interactive action buttons (Mark done, Snooze 10m, Join meeting) are handled
+ *   in handler.ts without opening/navigating into the app.
  */
 export function useNotificationNavigation(
   ready: boolean,
   authToken?: string | null,
 ) {
-  const pendingIdRef = useRef<string | null>(null);
+  const pendingTargetRef = useRef<NavigationTarget | null>(null);
   const handledResponsesRef = useRef(new Set<string>());
   const authTokenRef = useRef<string | null>(authToken ?? null);
 
@@ -64,11 +91,14 @@ export function useNotificationNavigation(
 
   useEffect(() => {
     if (!ready) return;
-    const pending = pendingIdRef.current;
+    const pending = pendingTargetRef.current;
     if (!pending) return;
-    pendingIdRef.current = null;
+    pendingTargetRef.current = null;
     // Small delay so the root Stack exists after auth redirect.
-    const timer = setTimeout(() => openReminder(pending), 250);
+    const timer = setTimeout(
+      () => openReminder(pending.reminderId, pending.action),
+      250,
+    );
     return () => clearTimeout(timer);
   }, [ready]);
 
@@ -98,23 +128,23 @@ export function useNotificationNavigation(
         return;
       }
 
-      const reminderId = reminderIdFromResponse(response);
-      if (!reminderId) return;
+      const target = reminderTargetFromResponse(response);
+      if (!target) return;
 
       // Record dispatchId so delayed remote pushes are suppressed, and notify backend
       const resolved = resolveDispatchId(response.notification.request.content.data);
       if (resolved) {
         markDispatchHandled(resolved.reminderId, resolved.leadTime, authTokenRef.current);
       } else {
-        markDispatchHandled(reminderId, 0, authTokenRef.current);
+        markDispatchHandled(target.reminderId, 0, authTokenRef.current);
       }
 
       if (!ready) {
-        pendingIdRef.current = reminderId;
+        pendingTargetRef.current = target;
         return;
       }
 
-      openReminder(reminderId);
+      openReminder(target.reminderId, target.action);
       void Notifications.clearLastNotificationResponseAsync();
     }
 

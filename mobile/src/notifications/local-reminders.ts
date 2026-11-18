@@ -291,15 +291,19 @@ async function scheduleReminderLocalNotificationInternal(
 
     await ensureAndroidRemindersChannel();
 
-    // Deep link so taps reopen the app into this reminder edit page.
-    const path = `reminder/${reminder.id}`;
+    const kind = reminder.kind || "simple";
+    const meetLink = reminder.action?.meetLink ?? null;
+    const isMeeting = kind === "meeting" || Boolean(meetLink);
+
+    // Deep link so taps reopen the app into pre-meeting screen for meetings, or reminder detail for simple reminders.
+    const path = isMeeting
+      ? `reminder/${reminder.id}?action=join`
+      : `reminder/${reminder.id}`;
     const deepLink = Linking.createURL(path);
     const androidChannel =
       Platform.OS === "android" ? { channelId: REMINDERS_CHANNEL_ID } : {};
 
-    const kind = reminder.kind || "simple";
     const categoryIdentifier = resolveNotificationCategory(kind);
-    const meetLink = reminder.action?.meetLink ?? null;
     const joinUrl = meetLink;
 
     const scheduledIds: string[] = [];
@@ -342,8 +346,11 @@ async function scheduleReminderLocalNotificationInternal(
             title: reminder.title,
             notes: reminder.notes ?? null,
             kind,
+            action: isMeeting ? "join" : undefined,
             screen: "reminder",
-            url: `/reminder/${reminder.id}`,
+            url: isMeeting
+              ? `/reminder/${reminder.id}?action=join`
+              : `/reminder/${reminder.id}`,
             deepLink,
             joinUrl,
             meetLink,
@@ -418,8 +425,11 @@ async function scheduleReminderLocalNotificationInternal(
             title: reminder.title,
             notes: reminder.notes ?? null,
             kind,
+            action: isMeeting ? "join" : undefined,
             screen: "reminder",
-            url: `/reminder/${reminder.id}`,
+            url: isMeeting
+              ? `/reminder/${reminder.id}?action=join`
+              : `/reminder/${reminder.id}`,
             deepLink,
             joinUrl,
             meetLink,

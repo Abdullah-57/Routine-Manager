@@ -1,3 +1,4 @@
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -5,8 +6,10 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -30,6 +33,7 @@ import {
 } from "@/notifications/local-reminders";
 import {
   formatReminderTime,
+  formatTimeOnly,
   fromLocalDateTimeInput,
   toLocalDateTimeInput,
 } from "@/utils/reminder-time";
@@ -73,6 +77,24 @@ function getDeviceTimezone() {
   }
 }
 
+function formatRelativeCountdown(startAtISO: string): string {
+  const diffMs = new Date(startAtISO).getTime() - Date.now();
+  if (diffMs < -60 * 1000) {
+    const minsAgo = Math.floor(-diffMs / (60 * 1000));
+    if (minsAgo < 60) return `Started ${minsAgo}m ago`;
+    const hoursAgo = Math.floor(minsAgo / 60);
+    return `Started ${hoursAgo}h ago`;
+  }
+  if (diffMs <= 60 * 1000) {
+    return "Starting Now";
+  }
+  const minsUntil = Math.ceil(diffMs / (60 * 1000));
+  if (minsUntil < 60) return `Starts in ${minsUntil} min`;
+  const hours = Math.floor(minsUntil / 60);
+  const remainingMins = minsUntil % 60;
+  return `Starts in ${hours}h ${remainingMins > 0 ? `${remainingMins}m` : ""}`.trim();
+}
+
 function BackChevron() {
   if (process.env.EXPO_OS === "ios") {
     return (
@@ -88,10 +110,20 @@ function BackChevron() {
 }
 
 export function ReminderDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, action } = useLocalSearchParams<{ id: string; action?: string }>();
   const { token, user } = useAuth();
   const { back } = useRouter();
   const insets = useSafeAreaInsets();
+
+  const [viewMode, setViewMode] = useState<"meeting" | "edit">(
+    action === "join" ? "meeting" : "edit",
+  );
+
+  useEffect(() => {
+    if (action === "join") {
+      setViewMode("meeting");
+    }
+  }, [action]);
 
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [title, setTitle] = useState("");
@@ -307,6 +339,74 @@ export function ReminderDetailScreen() {
     }
   }
 
+  const isMeetingItem =
+    kind === "meeting" ||
+    Boolean(meetLink) ||
+    (load.status === "ready" &&
+      (load.reminder.kind === "meeting" ||
+        Boolean(load.reminder.action?.meetLink)));
+
+  const finalMeetUrl = (
+    meetLink.trim() ||
+    (load.status === "ready" ? load.reminder.action?.meetLink?.trim() : "") ||
+    notes.match(/https?:\/\/[^\s]+/i)?.[0] ||
+    `https://meet.jit.si/RoutineApp-${(title || (load.status === "ready" ? load.reminder.title : "Meeting")).replace(/[^a-zA-Z0-9]/g, "")}-${id}`
+  ).trim();
+
+  const formattedMeetUrl = /^https?:\/\//i.test(finalMeetUrl)
+    ? finalMeetUrl
+    : `https://${finalMeetUrl}`;
+
+  async function handleLaunchMeeting() {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    try {
+      await Linking.openURL(formattedMeetUrl);
+    } catch (err) {
+      Alert.alert("Could not open meeting", (err as Error)?.message || String(err));
+    }
+  }
+
+  async function handleShareMeetingLink() {
+    void Haptics.selectionAsync().catch(() => {});
+    try {
+      await Share.share({
+        title: title || (load.status === "ready" ? load.reminder.title : "Meeting"),
+        message: `Join meeting: ${formattedMeetUrl}`,
+        url: formattedMeetUrl,
+      });
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  async function handleQuickComplete() {
+    if (savingRef.current || isSaving || !token || !id) return;
+    savingRef.current = true;
+    setIsSaving(true);
+    setFormError(null);
+    setSaveMessage(null);
+    try {
+      await cancelReminderLocalNotification(id);
+      const { reminder } = await updateReminder(token, id, {
+        status: "completed",
+      });
+      applyReminderToForm(reminder);
+      setStatus("completed");
+      setLoad({ status: "ready", reminder });
+      setSaveMessage("Meeting marked as completed!");
+      void Haptics.notificationAsync(
+        Haptics.NotificationFeedbackType.Success,
+      ).catch(() => {});
+    } catch (e) {
+      setFormError(
+        e instanceof ApiError ? e.message : "Could not update status",
+      );
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
+  }
+
   const startPreview = fromLocalDateTimeInput(startLocal, timezone);
   const endPreview = endLocal.trim()
     ? fromLocalDateTimeInput(endLocal.trim(), timezone)
@@ -345,21 +445,251 @@ export function ReminderDetailScreen() {
         ) : null}
 
         {load.status === "ready" ? (
-          <>
-            <View style={styles.titleRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Go back"
-                onPress={() => back()}
-                style={({ pressed }) => [
-                  styles.backButton,
-                  pressed ? styles.pressed : null,
-                ]}
-              >
-                <BackChevron />
-              </Pressable>
-              <Text style={styles.screenTitle}>Edit reminder</Text>
-            </View>
+          viewMode === "meeting" && isMeetingItem ? (
+            <>
+              {/* Pre-Meeting Hub View */}
+              <View style={styles.titleRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                  onPress={() => back()}
+                  style={({ pressed }) => [
+                    styles.backButton,
+                    pressed ? styles.pressed : null,
+                  ]}
+                >
+                  <BackChevron />
+                </Pressable>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.screenTitle} numberOfLines={1}>
+                    Meeting Hub
+                  </Text>
+                  <Text style={styles.preMeetingSubtitle}>One-tap to video call</Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit Reminder Details"
+                  onPress={() => setViewMode("edit")}
+                  style={({ pressed }) => [
+                    styles.editModeToggle,
+                    pressed ? styles.pressed : null,
+                  ]}
+                >
+                  <Text style={styles.editModeToggleText}>✏️ Edit</Text>
+                </Pressable>
+              </View>
+
+              {formError ? (
+                <FeedbackBanner tone="error" title="Error" body={formError} />
+              ) : null}
+
+              {saveMessage ? (
+                <FeedbackBanner tone="success" title="Success" body={saveMessage} />
+              ) : null}
+
+              <View style={styles.preMeetingHeroCard}>
+                <View style={styles.preMeetingHeroHeader}>
+                  <View
+                    style={[
+                      styles.preMeetingHeroBadge,
+                      status === "completed"
+                        ? styles.preMeetingHeroBadgeCompleted
+                        : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.preMeetingHeroBadgeDot,
+                        status === "completed"
+                          ? styles.preMeetingHeroBadgeDotCompleted
+                          : null,
+                      ]}
+                    >
+                      ●
+                    </Text>
+                    <Text
+                      style={[
+                        styles.preMeetingHeroBadgeText,
+                        status === "completed"
+                          ? styles.preMeetingHeroBadgeTextCompleted
+                          : null,
+                      ]}
+                    >
+                      {status === "completed" ? "Completed" : "Ready to Join"}
+                    </Text>
+                  </View>
+                  <Text style={styles.preMeetingCountdown}>
+                    {formatRelativeCountdown(load.reminder.startAt)}
+                  </Text>
+                </View>
+
+                <Text style={styles.preMeetingHeroTitle}>
+                  {title || load.reminder.title}
+                </Text>
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Join Video Meeting Now"
+                  onPress={handleLaunchMeeting}
+                  style={({ pressed }) => [
+                    styles.preMeetingBigJoinButton,
+                    pressed ? styles.preMeetingButtonPressed : null,
+                  ]}
+                >
+                  <View style={styles.preMeetingBigJoinContent}>
+                    <View style={styles.preMeetingCamCircle}>
+                      <Text style={styles.preMeetingCamIcon}>📹</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.preMeetingBigJoinText}>
+                        Join Video Meeting
+                      </Text>
+                      <Text style={styles.preMeetingBigJoinSubtext}>
+                        {meetLink.trim()
+                          ? "Tap to open meeting in browser / app"
+                          : "Instant Jitsi Room ready"}
+                      </Text>
+                    </View>
+                    <Text style={styles.preMeetingJoinArrow}>→</Text>
+                  </View>
+                </Pressable>
+
+                <View style={styles.preMeetingLinkRow}>
+                  <View style={styles.preMeetingLinkBox}>
+                    <Text style={styles.preMeetingLinkText} numberOfLines={1}>
+                      {formattedMeetUrl}
+                    </Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Share meeting link"
+                    onPress={handleShareMeetingLink}
+                    style={({ pressed }) => [
+                      styles.preMeetingShareButton,
+                      pressed ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text style={styles.preMeetingShareText}>📤 Share</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.fieldLabel}>Scheduled Time</Text>
+                <View style={styles.preMeetingTimeRow}>
+                  <Text style={styles.preMeetingTimeIcon}>🕒</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.preMeetingTimePrimary}>
+                      {formatReminderTime(load.reminder.startAt, timezone)}
+                      {load.reminder.endAt
+                        ? ` → ${formatTimeOnly(load.reminder.endAt, timezone, false)}`
+                        : ""}
+                    </Text>
+                    <Text style={styles.preMeetingTimeSecondary}>
+                      Timezone: {timezone}
+                    </Text>
+                  </View>
+                </View>
+
+                {leadTimes.length > 0 ? (
+                  <View style={styles.preMeetingAlertsRow}>
+                    <Text style={styles.preMeetingAlertsIcon}>🔔</Text>
+                    <Text style={styles.preMeetingAlertsText}>
+                      Early notifications set for:{" "}
+                      {leadTimes.map((m) => formatLeadTime(m)).join(", ")} before
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {notes.trim() ? (
+                <View style={styles.card}>
+                  <Text style={styles.fieldLabel}>Agenda & Notes</Text>
+                  <Text style={styles.preMeetingNotesText}>{notes.trim()}</Text>
+                </View>
+              ) : null}
+
+              {attendees.length > 0 ? (
+                <View style={styles.card}>
+                  <Text style={styles.fieldLabel}>
+                    Invited Attendees ({attendees.length})
+                  </Text>
+                  <View style={styles.attendeesContainer}>
+                    {attendees.map((att, idx) => (
+                      <View key={idx} style={styles.attendeeItem}>
+                        <View style={styles.attendeeAvatar}>
+                          <Text style={styles.attendeeAvatarText}>
+                            {(att.name || att.email || "A").charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={styles.attendeeTextContainer}>
+                          <Text style={styles.attendeeName}>
+                            {att.name || "Attendee"}
+                          </Text>
+                          {att.email ? (
+                            <Text style={styles.attendeeEmail}>{att.email}</Text>
+                          ) : null}
+                        </View>
+                        {att.inviteSentAt ? (
+                          <View style={styles.inviteSentChip}>
+                            <Text style={styles.inviteSentText}>✉️ Invite Sent</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={styles.preMeetingActions}>
+                {status !== "completed" ? (
+                  <AppButton
+                    label="✓ Mark as Completed"
+                    variant="primary"
+                    loading={isSaving}
+                    onPress={handleQuickComplete}
+                    style={styles.preMeetingCompleteButton}
+                  />
+                ) : null}
+
+                <AppButton
+                  label="Edit Reminder Details"
+                  variant="ghost"
+                  onPress={() => setViewMode("edit")}
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.titleRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                  onPress={() => back()}
+                  style={({ pressed }) => [
+                    styles.backButton,
+                    pressed ? styles.pressed : null,
+                  ]}
+                >
+                  <BackChevron />
+                </Pressable>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.screenTitle}>Edit reminder</Text>
+                </View>
+                {isMeetingItem ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Open Pre-Meeting Hub"
+                    onPress={() => setViewMode("meeting")}
+                    style={({ pressed }) => [
+                      styles.editModeToggle,
+                      pressed ? styles.pressed : null,
+                    ]}
+                  >
+                    <Text style={styles.editModeToggleText}>🎥 Hub</Text>
+                  </Pressable>
+                ) : null}
+              </View>
 
             {kind === "meeting" || meetLink || attendees.length > 0 ? (
               <View style={styles.meetingCard}>
@@ -398,6 +728,18 @@ export function ReminderDetailScreen() {
                     <Text style={styles.joinButtonText}>Join Video Meeting Now</Text>
                   </Pressable>
                 ) : null}
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open Pre-Meeting Hub"
+                  onPress={() => setViewMode("meeting")}
+                  style={({ pressed }) => [
+                    styles.openHubButton,
+                    pressed ? styles.pressed : null,
+                  ]}
+                >
+                  <Text style={styles.openHubButtonText}>🎥 Open Pre-Meeting Hub</Text>
+                </Pressable>
 
                 {attendees.length > 0 ? (
                   <View style={styles.attendeesContainer}>
@@ -703,7 +1045,8 @@ export function ReminderDetailScreen() {
               />
             </View>
           </>
-        ) : null}
+        )
+      ) : null}
       </ScrollView>
     </View>
   );
@@ -1040,5 +1383,213 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.85,
+  },
+  preMeetingSubtitle: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  editModeToggle: {
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+  },
+  editModeToggleText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1D4ED8",
+  },
+  preMeetingHeroCard: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.xl,
+    borderCurve: "continuous",
+    backgroundColor: "#F0F7FF",
+    borderWidth: 2,
+    borderColor: "rgba(37, 99, 235, 0.35)",
+    boxShadow: shadows.subtle,
+  },
+  preMeetingHeroHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  preMeetingHeroBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+  },
+  preMeetingHeroBadgeCompleted: {
+    backgroundColor: "#E2E8F0",
+  },
+  preMeetingHeroBadgeDot: {
+    fontSize: 10,
+    color: "#16A34A",
+  },
+  preMeetingHeroBadgeDotCompleted: {
+    color: "#64748B",
+  },
+  preMeetingHeroBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#15803D",
+  },
+  preMeetingHeroBadgeTextCompleted: {
+    color: "#475569",
+  },
+  preMeetingCountdown: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  preMeetingHeroTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.3,
+  },
+  preMeetingBigJoinButton: {
+    backgroundColor: "#1D4ED8",
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    boxShadow: shadows.subtle,
+  },
+  preMeetingButtonPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.98 }],
+  },
+  preMeetingBigJoinContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 4,
+  },
+  preMeetingCamCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preMeetingCamIcon: {
+    fontSize: 22,
+  },
+  preMeetingBigJoinText: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: -0.2,
+  },
+  preMeetingBigJoinSubtext: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.8)",
+    marginTop: 2,
+  },
+  preMeetingJoinArrow: {
+    fontSize: 20,
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  preMeetingLinkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  preMeetingLinkBox: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm - 1,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.2)",
+  },
+  preMeetingLinkText: {
+    fontSize: 12,
+    color: "#3B82F6",
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  preMeetingShareButton: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.3)",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm - 1,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preMeetingShareText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1D4ED8",
+  },
+  preMeetingTimeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: 2,
+  },
+  preMeetingTimeIcon: {
+    fontSize: 20,
+  },
+  preMeetingTimePrimary: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  preMeetingTimeSecondary: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  preMeetingAlertsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(0, 0, 0, 0.06)",
+  },
+  preMeetingAlertsIcon: {
+    fontSize: 14,
+  },
+  preMeetingAlertsText: {
+    fontSize: 12,
+    color: "#475569",
+    fontWeight: "500",
+  },
+  preMeetingNotesText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#334155",
+  },
+  preMeetingActions: {
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  preMeetingCompleteButton: {
+    backgroundColor: "#16A34A",
+  },
+  openHubButton: {
+    marginTop: spacing.xs,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  openHubButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1D4ED8",
   },
 });

@@ -125,12 +125,20 @@ export async function dispatchDueReminders(targetNow?: Date): Promise<DispatchRe
       const meetLink = reminder.action?.meetLink ?? null;
       const joinUrl = meetLink;
 
+      const isMeeting = kind === "meeting" || Boolean(meetLink);
+      const action = isMeeting ? "join" : undefined;
+
       const data: Record<string, unknown> = {
         reminderId: reminder._id.toString(),
         kind,
+        action,
         screen: "reminder",
-        url: `/reminder/${reminder._id.toString()}`,
-        deepLink: `routine-manager://reminder/${reminder._id.toString()}`,
+        url: isMeeting
+          ? `/reminder/${reminder._id.toString()}?action=join`
+          : `/reminder/${reminder._id.toString()}`,
+        deepLink: isMeeting
+          ? `routine-manager://reminder/${reminder._id.toString()}?action=join`
+          : `routine-manager://reminder/${reminder._id.toString()}`,
         joinUrl,
         meetLink,
         isPreAlert,
