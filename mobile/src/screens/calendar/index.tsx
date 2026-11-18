@@ -16,6 +16,7 @@ import { ApiError, pingHealth } from "@/api/client";
 import { sendTestPush } from "@/api/notifications";
 import { listReminders, type ReminderSummary } from "@/api/reminders";
 import { useAuth } from "@/auth/AuthContext";
+import { DayStrip } from "@/components/day-strip";
 import { DayTimeline } from "@/components/day-timeline";
 import { HomeSidebar } from "@/components/home-sidebar";
 import { MonthCalendar } from "@/components/month-calendar";
@@ -26,6 +27,7 @@ import {
   dateKeyInTimezone,
   formatTimeOnly,
   monthRangeISO,
+  shiftDateKey,
   todayDateKey,
 } from "@/utils/reminder-time";
 import { requestNotificationPermission } from "@/notifications/local-reminders";
@@ -188,6 +190,37 @@ export function CalendarScreen() {
     }
     return marks;
   }, [monthReminders, timezone]);
+
+  const dateCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of monthReminders) {
+      const key = dateKeyInTimezone(
+        item.startAt,
+        item.timezone || timezone,
+      );
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  }, [monthReminders, timezone]);
+
+  const handleSelectDate = useCallback(
+    (newDateKey: string) => {
+      setSelectedDate(newDateKey);
+      const [y, m] = newDateKey.split("-").map(Number);
+      if (y !== visibleMonth.year || m !== visibleMonth.month) {
+        setVisibleMonth({ year: y, month: m });
+      }
+    },
+    [visibleMonth.year, visibleMonth.month],
+  );
+
+  const goToNextDay = useCallback(() => {
+    handleSelectDate(shiftDateKey(selectedDate, 1));
+  }, [handleSelectDate, selectedDate]);
+
+  const goToPrevDay = useCallback(() => {
+    handleSelectDate(shiftDateKey(selectedDate, -1));
+  }, [handleSelectDate, selectedDate]);
 
   const dayReminders = useMemo(() => {
     // Applies to ALL reminders (old and new): earliest startAt at top.
@@ -367,26 +400,54 @@ export function CalendarScreen() {
             month={visibleMonth.month}
             selectedDate={selectedDate}
             markedDates={markedDates}
-            onSelectDate={setSelectedDate}
+            dateCounts={dateCounts}
+            onSelectDate={handleSelectDate}
             onChangeMonth={(year, month) => {
               setVisibleMonth({ year, month });
               // Keep selection inside the new month when possible
               const day = Number(selectedDate.split("-")[2] || "1");
               const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
               const clamped = Math.min(day, daysInMonth);
-              setSelectedDate(
+              handleSelectDate(
                 `${year}-${String(month).padStart(2, "0")}-${String(clamped).padStart(2, "0")}`,
               );
             }}
           />
         ) : null}
 
-        {/* Timeline Header Row with Title, Event Count, Today jump, and Calendar toggle */}
+        {/* Timeline Header Row with Title, Day Steppers, Event Count, Today jump, and Calendar toggle */}
         <View style={styles.timelineHeaderRow}>
           <View style={styles.timelineTitleGroup}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Previous day"
+              hitSlop={8}
+              onPress={goToPrevDay}
+              style={({ pressed }) => [
+                styles.dayNavArrow,
+                pressed ? styles.pressed : null,
+              ]}
+            >
+              <Text style={styles.dayNavArrowText}>‹</Text>
+            </Pressable>
+
             <ThemedText variant="title" style={styles.sectionTitle}>
               {selectedDate}
             </ThemedText>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Next day"
+              hitSlop={8}
+              onPress={goToNextDay}
+              style={({ pressed }) => [
+                styles.dayNavArrow,
+                pressed ? styles.pressed : null,
+              ]}
+            >
+              <Text style={styles.dayNavArrowText}>›</Text>
+            </Pressable>
+
             <View style={styles.countBadge}>
               <Text style={styles.countBadgeText}>
                 {dayReminders.length === 0
@@ -403,9 +464,7 @@ export function CalendarScreen() {
                 accessibilityLabel="Jump to today"
                 onPress={() => {
                   const today = todayDateKey(timezone);
-                  setSelectedDate(today);
-                  const [y, m] = today.split("-").map(Number);
-                  setVisibleMonth({ year: y, month: m });
+                  handleSelectDate(today);
                 }}
                 style={({ pressed }) => [
                   styles.todayBtn,
@@ -431,6 +490,14 @@ export function CalendarScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* Compact Day-Strip of 7 date chips above the timeline */}
+        <DayStrip
+          selectedDate={selectedDate}
+          timezone={timezone}
+          dateCounts={dateCounts}
+          onSelectDate={handleSelectDate}
+        />
 
         {load.status === "error" && dayReminders.length > 0 ? (
           <FeedbackBanner
@@ -467,6 +534,8 @@ export function CalendarScreen() {
             onPressReminder={onPressReminder}
             onRefresh={retryFetchMonth}
             refreshing={load.status === "refreshing"}
+            onSwipeLeft={goToNextDay}
+            onSwipeRight={goToPrevDay}
           />
         )}
       </View>
@@ -585,7 +654,21 @@ const styles = StyleSheet.create({
   timelineTitleGroup: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
+    gap: 6,
+  },
+  dayNavArrow: {
+    width: 24,
+    height: 24,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+  },
+  dayNavArrowText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#2563EB",
+    lineHeight: 18,
   },
   countBadge: {
     paddingHorizontal: 8,

@@ -9,6 +9,7 @@ type MonthCalendarProps = {
   month: number; // 1-12
   selectedDate: string; // YYYY-MM-DD
   markedDates: Record<string, boolean>;
+  dateCounts?: Record<string, number>;
   onSelectDate: (dateKey: string) => void;
   onChangeMonth: (year: number, month: number) => void;
 };
@@ -77,6 +78,7 @@ export function MonthCalendar({
   month,
   selectedDate,
   markedDates,
+  dateCounts,
   onSelectDate,
   onChangeMonth,
 }: MonthCalendarProps) {
@@ -136,12 +138,15 @@ export function MonthCalendar({
           }
 
           const selected = cell.dateKey === selectedDate;
-          const marked = !!markedDates[cell.dateKey];
+          const count =
+            (dateCounts && cell.dateKey ? dateCounts[cell.dateKey] : 0) ||
+            (markedDates[cell.dateKey] ? 1 : 0);
 
           return (
             <Pressable
               key={cell.key}
               accessibilityRole="button"
+              accessibilityLabel={`${cell.label}${count > 0 ? `, ${count} events` : ""}`}
               onPress={() => onSelectDate(cell.dateKey!)}
               style={({ pressed }) => [
                 styles.cell,
@@ -157,7 +162,26 @@ export function MonthCalendar({
               >
                 {cell.label}
               </Text>
-              {marked ? (
+              {count > 1 ? (
+                <View
+                  style={[
+                    styles.badgeWrap,
+                    selected ? styles.badgeWrapSelected : null,
+                  ]}
+                >
+                  <View
+                    style={[styles.dot, selected ? styles.dotSelected : null]}
+                  />
+                  <Text
+                    style={[
+                      styles.countText,
+                      selected ? styles.countTextSelected : null,
+                    ]}
+                  >
+                    {count > 9 ? "9+" : count}
+                  </Text>
+                </View>
+              ) : count === 1 ? (
                 <View
                   style={[styles.dot, selected ? styles.dotSelected : null]}
                 />
@@ -255,6 +279,28 @@ const styles = StyleSheet.create({
   dotPlaceholder: {
     width: 5,
     height: 5,
+  },
+  badgeWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+  },
+  badgeWrapSelected: {
+    backgroundColor: "rgba(255, 255, 255, 0.28)",
+  },
+  countText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#1D4ED8",
+    lineHeight: 11,
+  },
+  countTextSelected: {
+    color: "#FFFFFF",
   },
   pressed: {
     opacity: 0.75,

@@ -222,3 +222,36 @@ export function getHourAndMinuteInTimezone(
     return { hour: date.getHours(), minute: date.getMinutes() };
   }
 }
+
+/**
+ * Returns the 7 YYYY-MM-DD date strings for the Sunday-to-Saturday week containing dateKey.
+ */
+export function getWeekDates(dateKey: string): string[] {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const current = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const dayOfWeek = current.getUTCDay();
+
+  const dates: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const diff = i - dayOfWeek;
+    const dayDate = new Date(current.getTime() + diff * 86400000);
+    const dy = dayDate.getUTCFullYear();
+    const dm = String(dayDate.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(dayDate.getUTCDate()).padStart(2, "0");
+    dates.push(`${dy}-${dm}-${dd}`);
+  }
+  return dates;
+}
+
+/**
+ * Shifts a YYYY-MM-DD dateKey by deltaDays.
+ */
+export function shiftDateKey(dateKey: string, deltaDays: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const current = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const next = new Date(current.getTime() + deltaDays * 86400000);
+  const dy = next.getUTCFullYear();
+  const dm = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(next.getUTCDate()).padStart(2, "0");
+  return `${dy}-${dm}-${dd}`;
+}

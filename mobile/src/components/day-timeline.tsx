@@ -1,5 +1,7 @@
+import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -8,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import Animated, { FadeIn } from "react-native-reanimated";
 import type { ReminderSummary } from "@/api/reminders";
 import { ThemedText } from "@/components/ui/themed-text";
 import {
@@ -182,6 +185,8 @@ export type DayTimelineProps = {
   onPressReminder: (id: string) => void;
   onRefresh?: () => void;
   refreshing?: boolean;
+  onSwipeLeft?: () => void;
+  onSwipeRight?: () => void;
 };
 
 export function DayTimeline({
@@ -192,12 +197,37 @@ export function DayTimeline({
   onPressReminder,
   onRefresh,
   refreshing = false,
+  onSwipeLeft,
+  onSwipeRight,
 }: DayTimelineProps) {
   const scrollRef = useRef<React.ElementRef<typeof ScrollView> | null>(null);
   const [currentMinutes, setCurrentMinutes] = useState(() => {
     const { hour, minute } = getHourAndMinuteInTimezone(new Date(), timezone);
     return hour * 60 + minute;
   });
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+          // Capture only when the gesture is distinctly horizontal and beyond threshold
+          return (
+            Math.abs(gestureState.dx) > 30 &&
+            Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.8
+          );
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx < -45 && onSwipeLeft) {
+            void Haptics.selectionAsync();
+            onSwipeLeft();
+          } else if (gestureState.dx > 45 && onSwipeRight) {
+            void Haptics.selectionAsync();
+            onSwipeRight();
+          }
+        },
+      }),
+    [onSwipeLeft, onSwipeRight],
+  );
 
   const isToday = dateKey === todayDateKey(timezone);
 
@@ -244,7 +274,7 @@ export function DayTimeline({
   const nowTop = (currentMinutes / 60) * HOUR_HEIGHT;
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} {...panResponder.panHandlers}>
       {/* All-Day Strip at the top */}
       {allDay.length > 0 ? (
         <View style={styles.allDayContainer}>
@@ -300,7 +330,11 @@ export function DayTimeline({
           ) : undefined
         }
       >
-        <View style={styles.timelineBody}>
+        <Animated.View
+          key={dateKey}
+          entering={FadeIn.duration(150)}
+          style={styles.timelineBody}
+        >
           {/* Left Hour Gutter */}
           <View style={styles.gutter}>
             {HOURS.map((h) => (
@@ -466,7 +500,7 @@ export function DayTimeline({
               );
             })}
           </View>
-        </View>
+        </Animated.View>
       </ScrollView>
     </View>
   );
