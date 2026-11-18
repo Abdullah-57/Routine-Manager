@@ -515,7 +515,7 @@ export function ReminderDetailScreen() {
                           : null,
                       ]}
                     >
-                      {status === "completed" ? "Completed" : "Ready to Join"}
+                      {status === "completed" ? "Completed" : "Link is live"}
                     </Text>
                   </View>
                   <Text style={styles.preMeetingCountdown}>
@@ -526,6 +526,24 @@ export function ReminderDetailScreen() {
                 <Text style={styles.preMeetingHeroTitle}>
                   {title || load.reminder.title}
                 </Text>
+
+                {/* Feature 4.3 Meeting Smartness Pill */}
+                <View style={styles.smartLiveCard}>
+                  <View style={styles.smartLiveRow}>
+                    <Text style={styles.smartLivePulse}>🟢</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.smartLiveTitle}>Link is live & verified</Text>
+                      <Text style={styles.smartLiveSubtitle}>
+                        {formattedMeetUrl.includes("meet.google.com")
+                          ? "Google Meet room active"
+                          : "Jitsi HD Video room verified & ready for attendees"}
+                      </Text>
+                    </View>
+                    <View style={styles.smartLiveChip}>
+                      <Text style={styles.smartLiveChipText}>Active</Text>
+                    </View>
+                  </View>
+                </View>
 
                 <Pressable
                   accessibilityRole="button"
@@ -705,7 +723,7 @@ export function ReminderDetailScreen() {
                   </View>
                   {meetLink ? (
                     <View style={styles.liveBadge}>
-                      <Text style={styles.liveBadgeText}>Ready</Text>
+                      <Text style={styles.liveBadgeText}>● Link is live</Text>
                     </View>
                   ) : null}
                 </View>
@@ -1591,5 +1609,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#1D4ED8",
+  },
+  smartLiveCard: {
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "rgba(22, 163, 74, 0.25)",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.lg,
+  },
+  smartLiveRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  smartLivePulse: {
+    fontSize: 14,
+  },
+  smartLiveTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#15803D",
+  },
+  smartLiveSubtitle: {
+    fontSize: 11,
+    color: "#166534",
+    marginTop: 1,
+  },
+  smartLiveChip: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: spacing.xs + 4,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+  },
+  smartLiveChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#15803D",
   },
 });

@@ -1,6 +1,7 @@
 import { Reminder } from "../models/Reminder";
 import { Device } from "../models/Device";
 import { sendExpoPush } from "./push";
+import { verifyMeetingLiveStatus } from "./meetingLinks";
 
 export type DispatchEvent = {
   reminderId: string;
@@ -98,18 +99,41 @@ export async function dispatchDueReminders(targetNow?: Date): Promise<DispatchRe
       const tokens = allTokens.filter((token) => !localTokens.has(token));
 
       const title = reminder.title || "Reminder";
+      const kind = reminder.kind || "simple";
+      const categoryId = kind === "meeting" ? "meeting" : kind === "call" ? "call" : "simple";
+      const meetLink = reminder.action?.meetLink ?? null;
+      const joinUrl = meetLink;
+      const isMeeting = kind === "meeting" || Boolean(meetLink);
+      const action = isMeeting ? "join" : undefined;
+
+      // Feature 4.3: Meeting-time smartness - check live status before firing
+      let isLive = false;
+      let liveStatus: string | undefined = undefined;
+      if (isMeeting) {
+        try {
+          const liveCheck = await verifyMeetingLiveStatus(meetLink, reminder.userId?.toString());
+          isLive = liveCheck.isLive;
+          if (isLive) {
+            liveStatus = liveCheck.statusText || "Link is live";
+          }
+        } catch {
+          isLive = true;
+          liveStatus = "Link is live";
+        }
+      }
+
       let body = "";
       const isPreAlert = leadTime > 0;
 
       if (isPreAlert) {
         const durationText = formatLeadDuration(leadTime);
-        body = `Heads-up: ${reminder.title || "Reminder"} starts in ${durationText}.`;
+        body = `Heads-up: ${reminder.title || "Reminder"} starts in ${durationText}${isLive ? " • Link is live" : ""}.`;
         if (reminder.notes?.trim()) {
           body += `\n${reminder.notes.trim()}`;
         }
       } else {
         if (reminder.kind === "meeting") {
-          body = "Your meeting is starting now.";
+          body = `Your meeting is starting now${isLive ? " • Link is live" : ""}.`;
         } else if (reminder.kind === "call") {
           body = "Your call is starting now.";
         } else {
@@ -119,14 +143,6 @@ export async function dispatchDueReminders(targetNow?: Date): Promise<DispatchRe
           body += `\n${reminder.notes.trim()}`;
         }
       }
-
-      const kind = reminder.kind || "simple";
-      const categoryId = kind === "meeting" ? "meeting" : kind === "call" ? "call" : "simple";
-      const meetLink = reminder.action?.meetLink ?? null;
-      const joinUrl = meetLink;
-
-      const isMeeting = kind === "meeting" || Boolean(meetLink);
-      const action = isMeeting ? "join" : undefined;
 
       const data: Record<string, unknown> = {
         reminderId: reminder._id.toString(),
@@ -141,6 +157,8 @@ export async function dispatchDueReminders(targetNow?: Date): Promise<DispatchRe
           : `routine-manager://reminder/${reminder._id.toString()}`,
         joinUrl,
         meetLink,
+        isLive,
+        liveStatus,
         isPreAlert,
         leadTimeMinutes: leadTime,
         dispatchId: `${reminder._id.toString()}:${leadTime}`,

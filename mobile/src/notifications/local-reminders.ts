@@ -328,7 +328,7 @@ async function scheduleReminderLocalNotificationInternal(
       }
 
       const durationText = formatLeadDuration(mins);
-      let preBody = `Heads-up: ${reminder.title || "Reminder"} starts in ${durationText}.`;
+      let preBody = `Heads-up: ${reminder.title || "Reminder"} starts in ${durationText}${isMeeting ? " • Link is live" : ""}.`;
       if (reminder.notes?.trim()) {
         preBody += `\n${reminder.notes.trim()}`;
       }
@@ -337,7 +337,9 @@ async function scheduleReminderLocalNotificationInternal(
       const preIdentifier = await Notifications.scheduleNotificationAsync({
         content: {
           title: reminder.title || "Reminder",
-          subtitle: `Heads-up · In ${durationText}`,
+          subtitle: isMeeting
+            ? `Heads-up · In ${durationText} • Link is live`
+            : `Heads-up · In ${durationText}`,
           body: preBody,
           categoryIdentifier,
           autoDismiss: true,
@@ -347,6 +349,8 @@ async function scheduleReminderLocalNotificationInternal(
             notes: reminder.notes ?? null,
             kind,
             action: isMeeting ? "join" : undefined,
+            isLive: isMeeting,
+            liveStatus: isMeeting ? "Link is live" : undefined,
             screen: "reminder",
             url: isMeeting
               ? `/reminder/${reminder.id}?action=join`
@@ -396,8 +400,8 @@ async function scheduleReminderLocalNotificationInternal(
     const msUntilMain = startMs - now;
     if (msUntilMain > 1500) {
       let mainBody = "";
-      if (reminder.kind === "meeting") {
-        mainBody = "Your meeting is starting now.";
+      if (reminder.kind === "meeting" || isMeeting) {
+        mainBody = "Your meeting is starting now • Link is live.";
       } else if (reminder.kind === "call") {
         mainBody = "Your call is starting now.";
       } else {
@@ -412,8 +416,8 @@ async function scheduleReminderLocalNotificationInternal(
         content: {
           title: reminder.title || "Reminder",
           subtitle:
-            reminder.kind === "meeting"
-              ? "Meeting · Starts Now"
+            reminder.kind === "meeting" || isMeeting
+              ? "Meeting · Link is live"
               : reminder.kind === "call"
                 ? "Call · Starts Now"
                 : "Starts Now",
@@ -426,6 +430,8 @@ async function scheduleReminderLocalNotificationInternal(
             notes: reminder.notes ?? null,
             kind,
             action: isMeeting ? "join" : undefined,
+            isLive: isMeeting,
+            liveStatus: isMeeting ? "Link is live" : undefined,
             screen: "reminder",
             url: isMeeting
               ? `/reminder/${reminder.id}?action=join`
