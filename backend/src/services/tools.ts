@@ -30,7 +30,7 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "create_reminders",
       description:
-        "Create one or more reminders for the user. Strictly follow universal date/time inference rules: (1) date given, no time -> 09:00 local; (2) time given, no date -> today if clock time is ahead, tomorrow if passed; (3) relative durations ('in N minutes/hours') -> compute precisely from current local datetime without rounding; (4) vague instructions ('next week') -> next Monday 09:00 local.",
+        "Create one or more reminders for the user. Strictly follow universal date/time inference rules: (1) date given, no time -> 09:00 local; (2) time given, no date -> today if clock time is ahead, tomorrow if passed; (3) relative durations ('in N minutes/hours') -> compute precisely from current local datetime without rounding; (4) vague instructions ('next week') -> next Monday 09:00 local; (5) pre-reminders / heads-up ('remind me 15m before' -> leadTimes: [15], 'don't remind me early' / 'no pre-alert' -> leadTimes: []).",
       parameters: {
         type: "object",
         properties: {
@@ -86,7 +86,7 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "update_reminder",
       description:
-        "Update an existing reminder by id. Strictly follow universal manage rules: identify existing reminder by title keywords case-insensitively; 'move/change' -> update startAtISO; 'cancel' -> update status=cancelled; never create a duplicate when modifying an existing item.",
+        "Update an existing reminder by id. Strictly follow universal manage rules: identify existing reminder by title keywords case-insensitively or by pronoun resolution ('that one', 'it'); 'move/change time' -> update startAtISO; 'cancel' -> update status=cancelled; 'heads-up' / 'pre-alert' / 'pre-reminder' change or removal ('give me a 20m heads-up', 'change pre-alert to 45m', 'remove pre-alerts', 'don't remind me early') -> update leadTimes; never create a duplicate when modifying an existing item.",
       parameters: {
         type: "object",
         properties: {
@@ -106,7 +106,8 @@ export const routineTools: OpenAI.Chat.ChatCompletionTool[] = [
           leadTimes: {
             type: "array",
             items: { type: "integer", minimum: 0 },
-            description: "Updated pre-alert lead times in minutes before startAt (e.g. [30] or [60, 15] or []).",
+            description:
+              "Updated pre-alert lead times in minutes before startAt (e.g. [30] for 30m before, [60, 15] for 1h and 15m before, or [] to remove all pre-alerts).",
           },
           meetLink: {
             type: "string",

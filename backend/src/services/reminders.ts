@@ -330,7 +330,11 @@ export async function updateReminderForUser(
   if (input.title !== undefined) reminder.title = input.title.trim();
   if (input.notes !== undefined) reminder.notes = input.notes.trim();
   if (input.kind !== undefined) reminder.kind = input.kind;
-  if (input.leadTimes !== undefined) reminder.leadTimes = input.leadTimes;
+  if (input.leadTimes !== undefined) {
+    reminder.leadTimes = Array.from(
+      new Set(input.leadTimes.map((m) => Math.max(0, Math.floor(m)))),
+    ).sort((a, b) => b - a);
+  }
 
   if (input.meetLink !== undefined || input.attendees !== undefined) {
     (reminder as any).action = {
@@ -386,6 +390,7 @@ export async function updateReminderForUser(
       pastLeadTimes.push(0);
     }
     reminder.dispatchedLeadTimes = Array.from(new Set(pastLeadTimes));
+    (reminder as any).localScheduledTokens = [];
   }
 
   if (reminder.endAt && reminder.endAt < reminder.startAt) {

@@ -157,6 +157,7 @@ function buildSystemPrompt(
     "   - Always resolve 'that one', 'it', 'that' to the most recently created or modified reminder in this conversation session!",
     "   - Match its id against the Existing upcoming reminders list and call update_reminder or delete_reminder directly.",
     "   - Never create a duplicate reminder when the user says 'move that one to ...' or 'make it ... instead'.",
+    "   - This applies to pre-alerts too! E.g. 'give me a 20-minute heads-up for that one', 'change the pre-alert for it to 15 minutes', 'remove the pre-alert for that', 'don't remind me early for that one' -> call update_reminder with that reminder's id and updated leadTimes. Never create a new reminder!",
     "",
     "H) ACTION-AWARE MEETINGS & INVITES (FOLLOW STRICTLY):",
     "   - When the user asks to schedule a meeting, call, or appointment with a person (e.g. 'Schedule a meeting with Alex at 5 PM', 'Set up a call with Sarah'):",
@@ -175,13 +176,16 @@ function buildSystemPrompt(
     `     * simple: [${simpleDefaults.join(", ")}] (fires at event start time)`,
     `     * custom: [${customDefaults.join(", ")}]`,
     "   - When creating reminders (create_reminders):",
-    "     * If user explicitly asks for a heads-up or pre-alert (e.g. 'remind me 15 minutes before', 'give me a 30m heads-up', 'alert me 1 hour and 15 minutes ahead'): pass those exact minutes in leadTimes: [15] (or [30], [60, 15]).",
-    "     * If user explicitly says 'no pre-alert', 'no heads-up', or 'don't remind me early': pass leadTimes: [].",
+    "     * If user explicitly asks for a heads-up or pre-alert (e.g. 'remind me 15 minutes before', 'give me a 30m heads-up', 'alert me 1 hour and 15 minutes ahead'): pass those exact minutes in leadTimes: [15] (or [30], [60, 15]). Convert hours to minutes (1 hour = 60, 2 hours = 120, 1.5 hours = 90).",
+    "     * If user explicitly says 'no pre-alert', 'no heads-up', 'don't remind me early', 'turn off pre-alert', 'only alert me when it starts', 'without any heads-up': pass leadTimes: [].",
     "     * If user does NOT mention pre-alerts: omit leadTimes so default lead times for that kind apply automatically.",
     "   - When user sets default pre-alerts (set_default_lead_times):",
     "     * If user says 'give me a heads-up 30 minutes before every meeting', 'set default meeting alert to 30m', 'remind me 10 minutes before calls by default': call set_default_lead_times with kind and leadTimes.",
     "   - When user updates pre-alerts on an existing reminder (update_reminder):",
-    "     * If user says 'give me a 20 minute heads-up for that meeting', 'change the pre-alert to 45 minutes': call update_reminder with reminderId and leadTimes: [20].",
+    "     * If user asks to change or set a heads-up on an existing reminder (e.g. 'give me a 20 minute heads-up for that meeting', 'change the pre-alert to 45 minutes', 'set a 10m heads-up for dentist appointment'): identify the reminder id and call update_reminder with reminderId and leadTimes: [minutes].",
+    "     * If user asks to remove or turn off pre-alerts for an existing reminder (e.g. 'remove pre-alerts for that meeting', 'turn off the pre-reminder for that', 'don't remind me early for that one', 'no heads-up for the sync', 'clear pre-alerts for dentist'): call update_reminder with reminderId and leadTimes: [].",
+    "     * If user asks to add an additional pre-alert (e.g. 'also remind me 1 hour before for that meeting'): include the new time along with any existing leadTimes, e.g. leadTimes: [60, 15].",
+    "     * ALWAYS use update_reminder to modify lead times for existing reminders. NEVER create a duplicate reminder when the user is asking to change pre-alerts or lead times.",
     "",
     `User timezone: ${timezone}`,
     `Current UTC offset for that timezone: ${offset}`,
@@ -232,20 +236,65 @@ function formatReminderClock(
   }
 }
 
+function formatLeadDuration(minutes: number, adjective = false): string {
+  if (minutes <= 0) return "at start time";
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    if (adjective) {
+      return `${hours}-hour`;
+    }
+    return `${hours} hour${hours > 1 ? "s" : ""}`;
+  }
+  if (minutes > 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
+  }
+  if (adjective) {
+    return `${minutes}-minute`;
+  }
+  return `${minutes} minute${minutes !== 1 ? "s" : ""}`;
+}
+
+function formatLeadTimesList(leadTimes: number[], adjective = false): string {
+  if (!leadTimes || leadTimes.length === 0) return "no pre-alerts";
+  return leadTimes.map((m) => formatLeadDuration(m, adjective)).join(" and ");
+}
+
 /** Prefer factual times from tool results so the UI message and TTS voice never invent wrong clocks. */
 function buildFactualAssistantMessage(
   modelMessage: string,
   affect: ToolAffectSummary,
   timezone: string,
   now: Date,
+  toolCalls?: ToolExecutionRecord[],
 ): string {
   const parts: string[] = [];
+
+  const updateArgsMap = new Map<string, any>();
+  const createArgsList: any[] = [];
+
+  if (toolCalls) {
+    for (const tc of toolCalls) {
+      if (tc.name === "update_reminder" && tc.arguments) {
+        const args = typeof tc.arguments === "string" ? JSON.parse(tc.arguments) : tc.arguments;
+        if (args?.reminderId) {
+          updateArgsMap.set(args.reminderId, args);
+        }
+      } else if (tc.name === "create_reminders" && tc.arguments) {
+        const args = typeof tc.arguments === "string" ? JSON.parse(tc.arguments) : tc.arguments;
+        if (Array.isArray(args?.reminders)) {
+          createArgsList.push(...args.reminders);
+        }
+      }
+    }
+  }
 
   if (affect.defaultLeadTimesUpdated && affect.defaultLeadTimesUpdated.length > 0) {
     for (const update of affect.defaultLeadTimesUpdated) {
       const timesStr =
         update.leadTimes.length > 0
-          ? update.leadTimes.map((m) => `${m} minutes`).join(" and ")
+          ? update.leadTimes.map((m) => formatLeadDuration(m)).join(" and ")
           : "no pre-alerts";
       parts.push(
         `I've set your default pre-alerts for ${update.kind} reminders to ${timesStr} before.`,
@@ -257,17 +306,37 @@ function buildFactualAssistantMessage(
     if (affect.created.length === 1) {
       const item = affect.created[0];
       const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
+      const matchedArg = createArgsList.find(
+        (a) => a.title?.trim().toLowerCase() === item.title.trim().toLowerCase(),
+      );
+      let preAlertNote = "";
+      if (matchedArg?.leadTimes !== undefined) {
+        if (matchedArg.leadTimes.length > 0) {
+          preAlertNote = ` with a ${formatLeadTimesList(matchedArg.leadTimes, true)} heads-up`;
+        } else {
+          preAlertNote = ` with no pre-alerts`;
+        }
+      }
       if (item.kind === "meeting" || item.action?.meetLink) {
         const attendee = item.action?.attendees?.[0]?.email ? ` and sent the invite to ${item.action.attendees[0].email}` : "";
-        parts.push(`I've scheduled ${item.title} for ${when} with a meeting link${attendee}.`);
+        parts.push(`I've scheduled ${item.title} for ${when}${preAlertNote} with a meeting link${attendee}.`);
       } else {
-        parts.push(`I've scheduled ${item.title} for ${when}.`);
+        parts.push(`I've scheduled ${item.title} for ${when}${preAlertNote}.`);
       }
     } else {
       const itemsList = affect.created
         .map(
-          (item) =>
-            `${item.title} (${formatReminderClock(item.startAt, item.timezone || timezone, now)})`,
+          (item) => {
+            const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
+            const matchedArg = createArgsList.find(
+              (a) => a.title?.trim().toLowerCase() === item.title.trim().toLowerCase(),
+            );
+            const preNote =
+              matchedArg?.leadTimes !== undefined && matchedArg.leadTimes.length > 0
+                ? ` [heads-up: ${formatLeadTimesList(matchedArg.leadTimes, true)}]`
+                : "";
+            return `${item.title} (${when}${preNote})`;
+          },
         )
         .join(", ");
       parts.push(`I've scheduled ${affect.created.length} reminders: ${itemsList}.`);
@@ -275,13 +344,45 @@ function buildFactualAssistantMessage(
   }
 
   if (affect.updated.length > 0) {
-    const itemsList = affect.updated
-      .map(
-        (item) =>
-          `${item.title} (${item.status}) for ${formatReminderClock(item.startAt, item.timezone || timezone, now)}`,
-      )
-      .join(", ");
-    parts.push(`Updated: ${itemsList}.`);
+    for (const item of affect.updated) {
+      const args = updateArgsMap.get(item.id);
+      const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
+      if (args) {
+        const hasLeadTimes = args.leadTimes !== undefined;
+        const hasStartAt = args.startAtISO !== undefined;
+        const hasStatus = args.status !== undefined;
+
+        if (hasStatus && args.status === "cancelled") {
+          parts.push(`I've cancelled ${item.title}.`);
+        } else if (hasStatus && args.status === "completed") {
+          parts.push(`I've marked ${item.title} as completed.`);
+        } else if (hasLeadTimes && !hasStartAt) {
+          if (args.leadTimes.length === 0) {
+            parts.push(`I've removed the pre-alerts for ${item.title}.`);
+          } else {
+            parts.push(
+              `I've updated the pre-alert for ${item.title} to ${formatLeadTimesList(args.leadTimes)} before.`,
+            );
+          }
+        } else if (hasLeadTimes && hasStartAt) {
+          if (args.leadTimes.length === 0) {
+            parts.push(`I've rescheduled ${item.title} to ${when} with no pre-alerts.`);
+          } else {
+            parts.push(
+              `I've rescheduled ${item.title} to ${when} with a ${formatLeadTimesList(args.leadTimes, true)} heads-up.`,
+            );
+          }
+        } else if (hasStartAt) {
+          parts.push(`I've rescheduled ${item.title} to ${when}.`);
+        } else if (args.title) {
+          parts.push(`I've renamed the reminder to ${item.title}.`);
+        } else {
+          parts.push(`Updated ${item.title} for ${when}.`);
+        }
+      } else {
+        parts.push(`Updated: ${item.title} (${item.status}) for ${when}.`);
+      }
+    }
   }
 
   if (affect.deleted.length > 0) {
@@ -316,8 +417,11 @@ async function buildExistingRemindersContext(
     }
     const lines = upcoming.map((item) => {
       const when = formatReminderClock(item.startAt, item.timezone || timezone, now);
-      const leadStr = item.leadTimes && item.leadTimes.length > 0 ? ` | leadTimes=[${item.leadTimes.join(",")}]` : "";
-      return `- id=${item.id} | ${item.title} | ${when}${leadStr} | status=${item.status}`;
+      const leadStr =
+        item.leadTimes && item.leadTimes.length > 0
+          ? ` | leadTimes=[${item.leadTimes.join(",")}]`
+          : " | leadTimes=[] (no pre-alerts)";
+      return `- id=${item.id} | ${item.title} | kind=${item.kind || "simple"} | ${when}${leadStr} | status=${item.status}`;
     });
     return `Existing upcoming reminders (use these ids for update/delete):\n${lines.join("\n")}`;
   } catch {
@@ -485,6 +589,7 @@ export async function parseRoutineWithTools(
     affect,
     input.timezone,
     now,
+    toolCalls,
   );
 
   const targetSessionId =
