@@ -1871,6 +1871,27 @@ Assuming work starts from an empty folder mid-week:
 ## 15. Modern Siri-Grade UI Overhaul & True Background Assistant Specifications
 *(Identical specification across `ASSISTANT_FEATURE_SPEC.md` and `IMPLEMENTATION_PLAN.md`)*
 
+### Strict Non-Regression & Additive Architecture Invariant
+
+> **CRITICAL ARCHITECTURAL RULE — ZERO CONFLICT WITH EXISTING IMPLEMENTATIONS:**  
+> These two major modifications (Modern UI Overhaul and Background Siri-Like Assistant) are **strictly additive**. They build directly on top of the existing, working foundation and **must never break, replace, alter, or regress any currently functional feature**:
+> 
+> 1. **Existing User Input Methods Preserved 100%:**  
+>    - The typed routine composer (`AiPlanComposer`) remains fully functional and accessible on the Home screen.
+>    - The push-to-talk recording sheet (`VoiceRecordSheet`) remains fully functional with Whisper upload.
+>    - The in-app voice assistant overlay (`AssistantOverlay`) continues to support tap-to-talk, multi-turn follow-ups, and spoken TTS feedback.
+> 
+> 2. **Existing Calendar & Timeline Retained 100%:**  
+>    - The custom 24-hour Day Timeline (`DayTimeline`), 7-day compact bar (`DayStrip`), Month view (`MonthCalendar`), and 3-Day / Week view modes are completely preserved without alteration.
+> 
+> 3. **Existing Backend, Scheduling & Integrations Untouched:**  
+>    - All backend routes (`/routines/parse`, `/routines/transcribe`, `/reminders`, auth endpoints) and MongoDB schemas remain unchanged.
+>    - Local push notification scheduling (`local-reminders.ts`), exact alarms (`SCHEDULE_EXACT_ALARM`), pre-meeting Jitsi link generation, and remote push token registration continue to work seamlessly.
+> 
+> 4. **How the New Modifications Layer Additively:**  
+>    - **UI Overhaul (Group A):** Modernizes visual presentation by upgrading the visual styling of existing components (`VoiceOrb`, `FloatingAssistantBubble`, card containers) and adding a daily routine completion ring using data already returned by `listReminders`. No existing controls, developer tools, or manual lists are deleted.
+>    - **Background System Assistant (Group B):** Acts purely as an external hands-free system trigger. When "Hey Assistant" is detected in the background or via hardware gesture / Siri Shortcut, it simply opens the *existing* `AssistantOverlay` session. It does not replace the voice pipeline or tool loop.
+
 ### Architectural Overview & Zero-Cost Guarantee
 
 > **100% Free & Zero-Credentials Guarantee:**  
