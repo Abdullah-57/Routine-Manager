@@ -671,7 +671,7 @@ The following project-specific AI agent skills are designated for implementing t
 
 | Code | Feature Title | Group | Status |
 | :--- | :--- | :--- | :--- |
-| **10.1** | Floating Glowing Assistant Orb & Fluid Audio Waveform | UI Overhaul | Ready to implement |
+| **10.1** | Floating Glowing Assistant Orb & Fluid Audio Waveform | UI Overhaul | Completed |
 | **10.2** | Modern Glassmorphic Dashboard & Live Routine Progress Rings | UI Overhaul | Ready to implement |
 | **10.3** | Siri-Style Smart Assistant Feedback Sheet & Entity Chips | UI Overhaul | Ready to implement |
 | **10.4** | Cohesive Global Theme, Fluid Micro-Interactions & Elevation Tokens | UI Overhaul | Ready to implement |

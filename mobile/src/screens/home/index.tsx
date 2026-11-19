@@ -39,6 +39,7 @@ import {
 } from "@/notifications/local-reminders";
 import { useAppPreferences } from "@/preferences/app-preferences";
 import * as Haptics from "expo-haptics";
+import { useSharedValue } from "react-native-reanimated";
 import {
   AssistantOverlay,
   type AssistantPhase,
@@ -255,6 +256,7 @@ export function HomeScreen() {
   const assistantSessionIdRef = useRef<string | null>(null);
 
   const [followUpWakeDetected, setFollowUpWakeDetected] = useState(false);
+  const liveAudioLevel = useSharedValue(0.2);
 
   const clearAssistantIdleTimer = useCallback(() => {
     if (assistantIdleTimerRef.current) {
@@ -787,6 +789,9 @@ export function HomeScreen() {
       isTtsSpeaking ||
       assistantPhase === "done",
     mode: assistantOverlayOpen ? "conversation" : "wake",
+    onVolumeChange: (vol: number) => {
+      liveAudioLevel.value = vol;
+    },
     onWake: handleWakeDetected,
     onFollowUpWake: (_phrase) => {
       // Never interrupt while assistant is thinking or speaking/responding
@@ -1277,6 +1282,7 @@ export function HomeScreen() {
         errorMessage={assistantError}
         createdReminders={assistantCreatedReminders}
         isTtsSpeaking={isTtsSpeaking}
+        audioLevel={liveAudioLevel}
         followUpWakeDetected={followUpWakeDetected}
         spokenFeedbackEnabled={prefs.spokenFeedbackEnabled}
         onToggleSpokenFeedback={() => {

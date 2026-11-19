@@ -297,6 +297,8 @@ export type UseWakeWordOptions = {
   onTranscript?: (transcript: string) => void;
   /** Callback fired when speech pauses and utterance is ready to process (in "conversation" mode) */
   onUtteranceComplete?: (transcript: string) => void;
+  /** Optional callback fired on real-time microphone volume change (normalized 0..1) */
+  onVolumeChange?: (volume: number) => void;
   /** Optional callback for logging or UI errors */
   onError?: (error: Error) => void;
 };
@@ -308,6 +310,8 @@ export type WakeWordState = {
   hasPermission: boolean | null;
   lastTranscript: string;
   wakeCount: number;
+  /** Real-time microphone audio input volume normalized between 0 and 1 */
+  audioVolume: number;
   clearTranscript: () => void;
   requestPermission: () => Promise<boolean>;
   restart: () => void;
@@ -326,6 +330,7 @@ export function useWakeWord({
   onFollowUpWake,
   onTranscript,
   onUtteranceComplete,
+  onVolumeChange,
   onError,
 }: UseWakeWordOptions): WakeWordState {
   const isNativeAvailable = Boolean(NativeSpeechRecognition);
@@ -335,6 +340,7 @@ export function useWakeWord({
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [lastTranscript, setLastTranscript] = useState("");
   const [wakeCount, setWakeCount] = useState(0);
+  const audioVolume = 0;
 
   const lastTranscriptRef = useRef<string>("");
   // Prevent multiple wake triggers within cooldown window (e.g., 2.5 seconds)
@@ -359,6 +365,9 @@ export function useWakeWord({
 
   const onUtteranceCompleteRef = useRef(onUtteranceComplete);
   onUtteranceCompleteRef.current = onUtteranceComplete;
+
+  const onVolumeChangeRef = useRef(onVolumeChange);
+  onVolumeChangeRef.current = onVolumeChange;
 
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -420,6 +429,10 @@ export function useWakeWord({
         continuous: Platform.OS === "ios",
         addsPunctuation: false,
         contextualStrings: [phrase, "hey assistant", "assistant"],
+        volumeChangeEventOptions: {
+          enabled: true,
+          intervalMillis: 40,
+        },
       });
     } catch (err) {
       isStartingRef.current = false;
@@ -509,6 +522,15 @@ export function useWakeWord({
     } else {
       setIsListening(false);
     }
+  });
+
+  // Handle live microphone acoustic input intensity
+  useSafeSpeechRecognitionEvent("volumechange", (event: { value: number }) => {
+    if (!enabledRef.current) return;
+    const raw = typeof event?.value === "number" ? event.value : 0;
+    // event.value on Android/iOS is typically -2..10. Normalize to 0.05..1.0
+    const normalized = Math.max(0.05, Math.min(1.0, (raw + 1) / 8.5));
+    onVolumeChangeRef.current?.(normalized);
   });
 
   // Handle live recognition results
@@ -721,6 +743,7 @@ export function useWakeWord({
     hasPermission,
     lastTranscript,
     wakeCount,
+    audioVolume,
     clearTranscript,
     requestPermission: handleRequestPermission,
     restart,

@@ -2287,7 +2287,7 @@ The following project-specific AI agent skills are designated for implementing t
 - [ ] 8.3 Android preview APK
 - [ ] 9.1 Hardening
 - [ ] 9.2 Demo script E2E
-- [ ] 10.1 Assistant Orb & Fluid Audio Waveform
+- [x] 10.1 Assistant Orb & Fluid Audio Waveform
 - [ ] 10.2 Glassmorphic Dashboard & Progress Rings
 - [ ] 10.3 Siri-Style Smart Assistant Feedback Sheet & Entity Chips
 - [ ] 10.4 Cohesive Global Theme, Micro-Interactions & Elevation

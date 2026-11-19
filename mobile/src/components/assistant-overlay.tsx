@@ -17,10 +17,12 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
+  type SharedValue,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ReminderSummary } from "@/api/reminders";
 import { colors, radius, shadows, spacing } from "@/theme";
+import { AssistantOrb } from "./assistant-orb";
 
 export type AssistantPhase =
   | "listening"
@@ -38,6 +40,8 @@ export type AssistantOverlayProps = {
   errorMessage?: string | null;
   createdReminders?: ReminderSummary[];
   isTtsSpeaking: boolean;
+  /** Live microphone input volume (0..1) */
+  audioLevel?: SharedValue<number>;
   followUpWakeDetected?: boolean;
   spokenFeedbackEnabled: boolean;
   onToggleSpokenFeedback: () => void;
@@ -257,6 +261,7 @@ export function AssistantOverlay({
   errorMessage,
   createdReminders = [],
   isTtsSpeaking,
+  audioLevel,
   followUpWakeDetected,
   spokenFeedbackEnabled,
   onToggleSpokenFeedback,
@@ -390,12 +395,17 @@ export function AssistantOverlay({
             </View>
           </View>
 
-          {/* Central Animated Orb */}
+          {/* Central Animated Orb (Feature 10.1: AssistantOrb with Multi-Ring Glow & Fluid Waveform) */}
           <View style={styles.orbSection}>
-            <VoiceOrb
+            <AssistantOrb
+              size={82}
               phase={phase}
+              isListening={phase === "listening"}
               isTtsSpeaking={isTtsSpeaking}
-              followUpWakeDetected={followUpWakeDetected}
+              audioLevel={audioLevel}
+              showWaveform={true}
+              showStatusDot={false}
+              style={{ marginBottom: spacing.xs }}
             />
             <Text style={styles.headline}>{headline}</Text>
             <Text style={styles.subheadline}>{subheadline}</Text>
