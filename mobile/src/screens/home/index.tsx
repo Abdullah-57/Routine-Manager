@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Linking,
   Platform,
   Pressable,
@@ -53,9 +54,17 @@ import {
 import {
   isClosingPhrase,
   isOnlyWakePhrase,
+  requestWakeWordPermissions,
   stripLeadingWakePhrase,
   useWakeWord,
 } from "@/assistant/wake-word-service";
+import {
+  addBackgroundWakeWordListener,
+  isNativeBackgroundSupported,
+  startBackgroundListener,
+  stopBackgroundListener,
+  updateBackgroundWakePhrase,
+} from "@/services/background-assistant";
 import { radius, shadows, spacing } from "@/theme";
 
 type PingState =
@@ -778,11 +787,80 @@ export function HomeScreen() {
     }
   }, [triggerAssistant, handleOpenAssistantManually, router]);
 
+  const [isAppActive, setIsAppActive] = useState(
+    AppState.currentState === "active",
+  );
+
+  // Feature 11.1: Background Assistant Foreground Service lifecycle & event subscription
+  useEffect(() => {
+    const handleAppStateChange = (nextState: string) => {
+      const isForeground = nextState === "active";
+      setIsAppActive(isForeground);
+
+      if (Platform.OS === "android") {
+        if (!isForeground) {
+          // App entered background or screen turned off: ensure foreground service is running
+          if (
+            prefs.assistantEnabled &&
+            prefs.microphoneEnabled &&
+            prefs.backgroundAssistantEnabled
+          ) {
+            void startBackgroundListener(prefs.wakePhrase);
+          }
+        }
+      }
+    };
+
+    const sub = AppState.addEventListener("change", handleAppStateChange);
+    return () => {
+      sub.remove();
+    };
+  }, [
+    prefs.assistantEnabled,
+    prefs.microphoneEnabled,
+    prefs.backgroundAssistantEnabled,
+    prefs.wakePhrase,
+  ]);
+
+  // Subscribe to wake-word detection events emitted from native background service
+  useEffect(() => {
+    const unsubscribe = addBackgroundWakeWordListener((event) => {
+      handleWakeDetected({
+        phrase: event.wakePhrase,
+        trailingTranscript: event.transcript,
+      });
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [handleWakeDetected]);
+
+  // Sync background service status and wake phrase dynamically with preferences
+  useEffect(() => {
+    if (Platform.OS === "android") {
+      if (
+        !prefs.backgroundAssistantEnabled ||
+        !prefs.assistantEnabled ||
+        !prefs.microphoneEnabled
+      ) {
+        void stopBackgroundListener();
+      } else {
+        void startBackgroundListener(prefs.wakePhrase);
+      }
+    }
+  }, [
+    prefs.backgroundAssistantEnabled,
+    prefs.assistantEnabled,
+    prefs.microphoneEnabled,
+    prefs.wakePhrase,
+  ]);
+
   const wakeWord = useWakeWord({
     enabled: prefs.assistantEnabled && prefs.microphoneEnabled,
     wakePhrase: prefs.wakePhrase,
     sensitivity: prefs.wakeSensitivity,
     paused:
+      !isAppActive ||
       voiceSheetOpen ||
       isVoiceBusy ||
       busy ||
@@ -1243,6 +1321,45 @@ export function HomeScreen() {
         spokenFeedbackEnabled={prefs.spokenFeedbackEnabled}
         onToggleSpokenFeedback={(value) => {
           void prefs.setSpokenFeedbackEnabled(value);
+        }}
+        backgroundAssistantEnabled={prefs.backgroundAssistantEnabled}
+        onToggleBackgroundAssistant={async (value) => {
+          if (value && Platform.OS === "android") {
+            if (!isNativeBackgroundSupported()) {
+              Alert.alert(
+                "Native Background Code Missing from APK",
+                "The currently installed APK does not contain the custom native Kotlin background service.\n\nEAS Build requires native files to be tracked in Git. Please run 'git add mobile/android' and rebuild with EAS to include the service."
+              );
+              return;
+            }
+            const notifGranted = await requestNotificationPermission();
+            if (!notifGranted) {
+              Alert.alert(
+                "Notification Permission Required",
+                "Android requires Notification permission to show the persistent 24/7 background service status in the notification drawer.\n\nPlease open Android Settings → Apps → Routine Manager → Permissions and allow Notifications."
+              );
+              return;
+            }
+            const micGranted = await requestWakeWordPermissions();
+            if (!micGranted) {
+              Alert.alert(
+                "Microphone Permission Required",
+                "Microphone permission is required for hands-free wake-word listening in the background.\n\nPlease open Android Settings → Apps → Routine Manager → Permissions and allow Microphone."
+              );
+              return;
+            }
+            const started = await startBackgroundListener(prefs.wakePhrase);
+            if (!started) {
+              Alert.alert(
+                "Service Start Error",
+                "Could not start the Android foreground service. Check device logs."
+              );
+              return;
+            }
+          } else if (!value && Platform.OS === "android") {
+            await stopBackgroundListener();
+          }
+          void prefs.setBackgroundAssistantEnabled(value);
         }}
         ping={ping}
         testPush={testPush}

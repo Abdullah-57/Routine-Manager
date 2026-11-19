@@ -1,0 +1,14 @@
+# EAS Build Ignore File
+node_modules/
+dist/
+web-build/
+*.tsbuildinfo
+.expo/
+ios/
+
+# Ignore local build artifacts only, KEEP native source code
+android/.gradle/
+android/.cxx/
+android/build/
+android/app/build/
+android/app/.cxx/

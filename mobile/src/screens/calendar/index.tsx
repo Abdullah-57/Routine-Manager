@@ -619,6 +619,10 @@ export function CalendarScreen() {
         onToggleSpokenFeedback={(value) => {
           void prefs.setSpokenFeedbackEnabled(value);
         }}
+        backgroundAssistantEnabled={prefs.backgroundAssistantEnabled}
+        onToggleBackgroundAssistant={(value) => {
+          void prefs.setBackgroundAssistantEnabled(value);
+        }}
         ping={ping}
         testPush={testPush}
         onPing={() => {

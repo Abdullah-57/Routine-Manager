@@ -5,8 +5,12 @@ node_modules/
 dist/
 build/
 .expo/
-mobile/android/
 mobile/ios/
+mobile/android/.gradle/
+mobile/android/.cxx/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/app/.cxx/
 coverage/
 *.log
 .DS_Store

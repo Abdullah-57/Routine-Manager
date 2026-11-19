@@ -34,11 +34,8 @@ export function getBaseUrl(): string {
     return ENV_BASE_URL;
   }
 
-  throw new ApiError(
-    "EXPO_PUBLIC_API_URL is not set. Add it to mobile/.env and restart Expo.",
-    0,
-    "CONFIG_ERROR",
-  );
+  // Fallback to PC Wi-Fi IP so standalone builds connect to local backend without failing
+  return "http://192.168.100.38:4000";
 }
 
 type ApiFetchOptions = Omit<RequestInit, "body" | "headers"> & {

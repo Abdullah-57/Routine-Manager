@@ -41,12 +41,14 @@ type HomeSidebarProps = {
   wakeSensitivity: WakeSensitivity;
   isAssistantListening?: boolean;
   spokenFeedbackEnabled?: boolean;
+  backgroundAssistantEnabled?: boolean;
   onToggleMicrophone: (value: boolean) => void;
   onTogglePush: (value: boolean) => void;
   onToggle24Hour: (value: boolean) => void;
   onToggleAssistant: (value: boolean) => void;
   onChangeWakeSensitivity: (value: WakeSensitivity) => void;
   onToggleSpokenFeedback?: (value: boolean) => void;
+  onToggleBackgroundAssistant?: (value: boolean) => void;
   ping: ToolState;
   testPush: ToolState;
   onPing: () => void;
@@ -85,12 +87,14 @@ export function HomeSidebar({
   wakeSensitivity,
   isAssistantListening = false,
   spokenFeedbackEnabled = true,
+  backgroundAssistantEnabled = false,
   onToggleMicrophone,
   onTogglePush,
   onToggle24Hour,
   onToggleAssistant,
   onChangeWakeSensitivity,
   onToggleSpokenFeedback,
+  onToggleBackgroundAssistant,
   ping,
   testPush,
   onPing,
@@ -226,6 +230,13 @@ export function HomeSidebar({
                 value={assistantEnabled}
                 onValueChange={onToggleAssistant}
               />
+              {onToggleBackgroundAssistant ? (
+                <SettingRow
+                  label="Background Assistant (24/7)"
+                  value={backgroundAssistantEnabled}
+                  onValueChange={onToggleBackgroundAssistant}
+                />
+              ) : null}
 
               {assistantEnabled ? (
                 <View style={styles.assistantDetailsCard}>
