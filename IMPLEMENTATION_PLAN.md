@@ -24,6 +24,7 @@
 12. [Testing & preview deployment strategy](#12-testing--preview-deployment-strategy)
 13. [Friday deadline reality check](#13-friday-deadline-reality-check)
 14. [Glossary for first-time mobile developers](#14-glossary-for-first-time-mobile-developers)
+15. [Modern Siri-Grade UI Overhaul & True Background Assistant Specifications](#15-modern-siri-grade-ui-overhaul--true-background-assistant-specifications)
 
 ---
 
@@ -1867,6 +1868,375 @@ Assuming work starts from an empty folder mid-week:
 
 ---
 
+## 15. Modern Siri-Grade UI Overhaul & True Background Assistant Specifications
+*(Identical specification across `ASSISTANT_FEATURE_SPEC.md` and `IMPLEMENTATION_PLAN.md`)*
+
+### Architectural Overview & Zero-Cost Guarantee
+
+> **100% Free & Zero-Credentials Guarantee:**  
+> All integrations specified below utilize **100% free, open-source, and on-device native platform APIs**.  
+> - **Zero** cloud API costs or ongoing subscriptions.
+> - **Zero** personal information, company email domains, credit cards, or account registrations required.
+> - **Zero** proprietary closed SDKs (e.g., no paid Porcupine console keys or cloud STT billing).
+> - All background listening, voice recognition, system overlays, and visual effects execute directly on the device using native Android (`android.speech`, `android.app.Service`, `WindowManager`) and iOS (Siri Shortcuts, App Intents, native speech) capabilities.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│               UNIFIED SYSTEM ARCHITECTURE: UI + TRUE SYSTEM ASSISTANT                  │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+
+ [ USER ANYWHERE ON PHONE ]
+         │
+         ├── Spoken "Hey Assistant" (Android Background / Screen Off / In Other App)
+         │       │
+         │       ▼
+         │   ┌──────────────────────────────────────────────────────────────┐
+         │   │ Native Android Foreground Service (FOREGROUND_SERVICE_MIC)   │
+         │   │ - Persistent Low-Key Notification                            │
+         │   │ - On-Device Android SpeechRecognizer Continuous Engine       │
+         │   │ - 100% Free, Zero-Network, Zero-Credentials VAD             │
+         │   └──────────────────────────────┬───────────────────────────────┘
+         │                                  │
+         │                                  ▼
+         │   ┌──────────────────────────────────────────────────────────────┐
+         │   │ System Overlay Launcher / Assist Role (SYSTEM_ALERT_WINDOW) │
+         │   │ - Floating Glowing Siri Orb draws OVER any active app        │
+         │   │ - Audio chime + haptic feedback                              │
+         │   └──────────────────────────────┬───────────────────────────────┘
+         │                                  │
+         ├── Hardware Trigger: Long-press Power button / Swipe up (Android Assist Role)
+         │                                  │
+         ├── Spoken "Hey Siri, Routine Assistant" (iOS Siri Shortcuts Gateway)
+         │                                  │
+         ▼                                  ▼
+ ┌──────────────────────────────────────────────────────────────────────────────────────┐
+ │                      MODERN SIRI-GRADE VISUAL INTERFACE                             │
+ │                                                                                      │
+ │  ┌────────────────────────────────────────────────────────────────────────────────┐  │
+ │  │ 1. Floating Glowing Assistant Orb & Real-Time Fluid Audio Waveform             │  │
+ │  │    - Multi-ring animated gradients (Reanimated 4) reactive to voice volume     │  │
+ │  │    - State-driven pulsing: Idle -> Listening -> Thinking -> Answering          │  │
+ │  │    - Dynamic Island style expandable pill & bottom sheet                      │  │
+ │  └────────────────────────────────────────────────────────────────────────────────┘  │
+ │                                                                                      │
+ │  ┌────────────────────────────────────────────────────────────────────────────────┐  │
+ │  │ 2. Glassmorphic Dashboard & Live Routine Progress Rings                        │  │
+ │  │    - Contextual time greeting + daily completion ring ("4/6 completed")        │  │
+ │  │    - Next upcoming activity hero card with frosted glass & action pills        │  │
+ │  └────────────────────────────────────────────────────────────────────────────────┘  │
+ │                                                                                      │
+ │  ┌────────────────────────────────────────────────────────────────────────────────┐  │
+ │  │ 3. Siri-Style Smart Assistant Feedback Sheet & Entity Chips                   │  │
+ │  │    - Live interim transcription pill with typewriter animation                 │  │
+ │  │    - Smart chips: [Time: 3 PM] [Title: Team Sync] [Meet: Jitsi Link]           │  │
+ │  │    - Natural TTS voice confirmation + one-tap undo pill                       │  │
+ │  └────────────────────────────────────────────────────────────────────────────────┘  │
+ └──────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### AI Agent Skills Setup & Verification
+
+The following project-specific AI agent skills are designated for implementing these atomic features. All skills are maintained directly within `.agents/skills/` at the project level:
+
+| Agent Skill | Purpose in these Features | Location |
+| :--- | :--- | :--- |
+| `expo-overview` | Entry point & routing for all Expo/React Native tasks | `.agents/skills/expo-overview` |
+| `expo-animation` | Building fluid spring animations, audio waveforms, gesture sheets, and orb pulsing with Reanimated | `.agents/skills/expo-animation` |
+| `expo-native-ui` | Apple HIG / Material 3 native styling, semantic tokens, and system controls | `.agents/skills/expo-native-ui` |
+| `expo-design-system`| Building reusable theme tokens, glassmorphic cards, typography hierarchy, and spacing | `.agents/skills/expo-design-system` |
+| `expo-ui` | Universal native sheets, buttons, pickers, and grouped rows | `.agents/skills/expo-ui` |
+| `expo-dev-client` | Compiling and configuring native Android/iOS code, permissions, and native foreground services | `.agents/skills/expo-dev-client` |
+| `expo-module` | Authoring custom Kotlin/Swift native modules for Android foreground services and system overlays | `.agents/skills/expo-module` |
+| `vercel-react-native-skills` | Best practices for performant rendering, 60fps animations, and background battery management | `.agents/skills/vercel-react-native-skills` |
+| `expo-router` | Deep-linking schemes (`routine-manager://assistant`) and modal routes | `.agents/skills/expo-router` |
+| `expo-data-fetching`| Handling offline caching, state synchronization, and background payload dispatch | `.agents/skills/expo-data-fetching` |
+
+> **Skill Setup Command:**  
+> If an agent skill is ever missing from the project-level directory, it can be installed immediately into `.agents/skills/` using the command:  
+> ```bash
+> npx skills add <skill-name> -o .agents/skills
+> ```  
+> Example: `npx skills add expo-module -o .agents/skills` or `npx skills add expo-animation -o .agents/skills`.
+
+---
+
+## Group A: Modern Siri-Grade UI & Visual System (Atomic Features)
+
+### Feature 10.1: Floating Glowing Assistant Orb & Fluid Audio Waveform
+**Goal:** Replace standard static buttons with an organic, multi-layered glowing assistant orb and fluid audio visualizer that dynamically pulses in response to user voice volume and assistant state.
+
+- **Required Agent Skills:** `expo-overview`, `expo-animation`, `expo-native-ui`, `expo-design-system`, `vercel-react-native-skills`.
+- **100% Free & Zero Credentials Guarantee:** Pure mathematical animations using `react-native-reanimated` worklets and native React Native vector primitives. No external visualizer SDKs or paid asset libraries.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Create `mobile/src/components/assistant-orb.tsx`:
+     - Implement multi-layered concentric circles with varying blur, opacity, and scale (`scale1`, `scale2`, `scale3`) driven by shared values in `react-native-reanimated`.
+     - State machine drives color palettes:
+       - *Idle*: Calm cyan-blue gradient with gentle breathing cycle (3000ms loop, scale 1.0 -> 1.05).
+       - *Listening*: Vibrant purple-magenta-blue gradient that pulses dynamically in real-time to speech audio metering decibels (`metering` prop from `expo-speech-recognition`, mapped via `interpolate(metering, [-60, 0], [1.0, 1.45])`).
+       - *Thinking/Processing*: Fast swirling dual-ring rotating continuous loop (`withRepeat(withTiming(360, { duration: 1200 }), -1)`).
+       - *Speaking/Answering*: Rhythmic acoustic expansion synchronized with `expo-speech` playback intervals.
+     - Add subtle particle / shimmer effects using radial gradient rings.
+  2. Create `mobile/src/components/audio-waveform-bars.tsx`:
+     - Render 5–7 vertical animated pill bars with varying phase delays (`delay = index * 80ms`).
+     - Each bar height springs between 4px and 36px based on live microphone decibels.
+  3. Integrate into `mobile/src/screens/home/index.tsx` and `mobile/src/components/assistant-overlay.tsx`:
+     - Position the Assistant Orb centrally at the bottom of the Home screen as a floating action trigger.
+     - On tap, trigger `Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)` and expand smoothly into the full assistant sheet.
+- **Acceptance Criteria & Test Steps:**
+  1. Open the app to the Home screen.
+  2. Verify the Assistant Orb is visible at the bottom with a smooth, breathing glow animation.
+  3. Tap the orb: verify medium haptic feedback fires, and the orb smoothly expands into the listening state.
+  4. Speak into the microphone: verify the orb rings and waveform bars expand and contract in direct response to your voice volume.
+  5. Stop speaking: verify the orb switches to the thinking rotation spinner, then to answering mode when TTS plays.
+
+---
+
+### Feature 10.2: Modern Glassmorphic Dashboard & Live Routine Progress Rings
+**Goal:** Transform the Home screen into a clean, modern Apple HIG / Material 3 dashboard featuring frosted-glass aesthetic cards, a contextual time greeting, and an interactive circular progress tracker for the day's routine.
+
+- **Required Agent Skills:** `expo-overview`, `expo-design-system`, `expo-native-ui`, `expo-animation`, `vercel-react-native-skills`.
+- **100% Free & Zero Credentials Guarantee:** 100% local React Native StyleSheet, linear gradients, and Reanimated SVG/layout tokens.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Create `mobile/src/components/glass-card.tsx`:
+     - Reusable container component with frosted glass aesthetic: translucent background (`rgba(255, 255, 255, 0.75)` on light mode, `rgba(30, 41, 59, 0.70)` on dark mode), 1px subtle light border (`rgba(255, 255, 255, 0.4)` / `rgba(255, 255, 255, 0.1)`), rounded corners (`borderRadius: 24`), and soft ambient shadow (`shadowOpacity: 0.08`, `shadowRadius: 16`).
+  2. Create `mobile/src/components/daily-progress-ring.tsx`:
+     - Circular progress meter using SVG or animated borders that calculates `completedCount / totalCount` for today's reminders/habits.
+     - Displays completion percentage or fraction (e.g. "4 of 6 completed") in the center with smooth animated spring fill.
+     - Subtext dynamically motivates: "On track", "All clear for today!", or "2 upcoming".
+  3. Update `mobile/src/screens/home/index.tsx`:
+     - **Header Section**: Contextual greeting based on device hour (`5..11 -> Good morning`, `12..16 -> Good afternoon`, `17..23 -> Good evening`) with the user's name and current date badge.
+     - **Hero Progress Section**: Embed the `DailyProgressRing` inside a prominent `GlassCard` alongside quick status badges.
+     - **Upcoming Focus Card**: Display the immediate next scheduled event with a color-coded vertical pill tag (`#2563EB` reminder, `#10B981` habit, `#8B5CF6` meeting), countdown timer (e.g., "In 25 minutes"), and direct quick-action buttons ("Mark Done", "Join Jitsi Meet").
+- **Acceptance Criteria & Test Steps:**
+  1. Launch the app in morning/afternoon hours and verify the greeting text dynamically reflects the time of day.
+  2. Verify the `GlassCard` renders with subtle borders and shadows.
+  3. Mark one routine as done: verify the `DailyProgressRing` smoothly animates its progress stroke forward and updates the count.
+  4. Verify the "Next Up" hero card displays the upcoming task with the correct category color pill and relative time.
+
+---
+
+### Feature 10.3: Siri-Style Smart Assistant Feedback Sheet & Interactive Entity Chips
+**Goal:** Deliver a modern voice assistant overlay that presents live speech recognition transcription, animated tool-calling status badges, and interactive entity chips (Time, Title, Meeting Link, Pre-alert) before confirming routine creation.
+
+- **Required Agent Skills:** `expo-overview`, `expo-animation`, `expo-native-ui`, `expo-ui`, `vercel-react-native-skills`.
+- **100% Free & Zero Credentials Guarantee:** 100% on-device React Native UI, native speech events, and local LLM tool response parsing.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Update `mobile/src/components/assistant-overlay.tsx`:
+     - Structure as a floating bottom sheet using `react-native-gesture-handler` with swipe-down-to-dismiss gesture and spring physics.
+     - Display the `AssistantOrb` at the top of the sheet header in compact listening mode.
+     - Add **Live Transcription Pill**: As `expo-speech-recognition` returns interim text, display words with dynamic opacity and typing effect so the user sees their words materialize in real-time.
+  2. Create `mobile/src/components/entity-chips-preview.tsx`:
+     - When the AI tool loop returns parsed reminders, render interactive visual pill chips for every parsed property before committing:
+       - 🕒 `Time: 10:30 AM` (tappable to adjust time picker if needed).
+       - 📝 `Title: Design Review with Team`.
+       - 🔗 `Meeting: Jitsi Link Generated` (tappable to preview or copy).
+       - 🔔 `Pre-alert: 15m & 1h prior`.
+       - 👤 `Contact: Alex (alex@example.com)`.
+  3. Action Confirmation Bar:
+     - Render a sleek dual-button bar:
+       - Confirm (filled gradient button with checkmark icon).
+       - Undo / Edit (subtle frosted pill button).
+     - Auto-dismiss countdown timer (5 seconds) with a subtle animated progress line, allowing hands-free auto-commit unless canceled.
+- **Acceptance Criteria & Test Steps:**
+  1. Open the voice assistant and speak: *"Schedule a team sync tomorrow at 3 PM with a Jitsi meeting link"*.
+  2. Verify the live transcription displays interim words cleanly as you speak.
+  3. Verify the parsed results populate as distinct interactive entity chips (`[Time: 3:00 PM]`, `[Title: Team sync]`, `[Meeting: Jitsi Link]`).
+  4. Verify the TTS voice confirms aloud while the auto-commit progress timer smoothly fills.
+  5. Tap "Undo" before the timer expires: verify the reminder creation is canceled with haptic feedback.
+
+---
+
+### Feature 10.4: Cohesive Global Theme, Fluid Micro-Interactions & Elevation Tokens
+**Goal:** Establish an unified visual token architecture across typography, elevation, dark/light contrast, and fluid micro-interactions across all screens (Home, Calendar, History, Settings).
+
+- **Required Agent Skills:** `expo-overview`, `expo-design-system`, `expo-native-ui`, `vercel-react-native-skills`.
+- **100% Free & Zero Credentials Guarantee:** Pure TypeScript design token constants and React Native theme hooks.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Create `mobile/src/theme/tokens.ts`:
+     - Define typography scales: `display` (34px, bold), `title` (24px, bold), `headline` (18px, semibold), `body` (15px, regular), `caption` (12px, medium).
+     - Define semantic color palettes:
+       - Surface: frosted glass tints, pure card surfaces, backdrop blurs.
+       - Routine categories: `task` (Deep Blue `#2563EB`), `habit` (Emerald `#10B981`), `meeting` (Violet `#8B5CF6`), `health` (Rose `#F43F5E`).
+       - Accent gradients: Siri Aurora (`#00F2FE` -> `#4FACFE`), Sunset Flame (`#FA709A` -> `#FEE140`).
+     - Define elevation and border-radius tokens (`sm: 8`, `md: 14`, `lg: 20`, `xl: 28`, `full: 9999`).
+  2. Add micro-interaction hooks:
+     - Button press scaling using `useAnimatedStyle` (`scale: withSpring(pressed ? 0.96 : 1.0)`).
+     - Seamless theme toggle support (light/dark mode) that smoothly updates all navigation bars, cards, and text contrast without flicker.
+  3. Polish `CalendarScreen` and `DayTimeline`:
+     - Apply unified tokens to hour grid labels, "Now" red line pill, and event card elevation borders.
+- **Acceptance Criteria & Test Steps:**
+  1. Switch system appearance between Light and Dark mode.
+  2. Verify all text remains sharp with high contrast ratios (>4.5:1).
+  3. Tap buttons, cards, and tabs: verify slight elastic spring down-press feedback (scale 0.96) accompanied by subtle haptics.
+  4. Verify the visual styling between Calendar, Home, and Assistant Overlay feels 100% coherent and modern.
+
+---
+
+## Group B: True Siri-Like Hands-Free System Assistant (Background & Closed App)
+
+### Feature 11.1: Native Android Foreground Service & Continuous Wake-Word Engine
+**Goal:** Enable continuous, zero-cost, hands-free "Hey Assistant" wake-word listening on Android even when the app is minimized, in the background, or when the phone screen is off/locked.
+
+- **Required Agent Skills:** `expo-overview`, `expo-dev-client`, `expo-module`, `vercel-react-native-skills`.
+- **100% Free & Zero Credentials Guarantee:** Built 100% on native Android OS platform APIs (`android.app.Service`, `android.speech.SpeechRecognizer`, `android.app.NotificationChannel`). Requires **zero** accounts, **zero** API keys, **zero** cloud billing, and uses offline on-device speech processing.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Create Native Android Service in `mobile/android/app/src/main/java/com/routinemanager/app/AssistantForegroundService.kt`:
+     - Inherit from `android.app.Service`.
+     - In `onCreate()`, register a persistent notification channel with `IMPORTANCE_LOW` (non-intrusive, silent status bar presence).
+     - Build persistent notification:
+       - Title: *"Routine Assistant Active"*.
+       - Text: *"Listening hands-free for 'Hey Assistant'..."*.
+       - Small icon: notification icon.
+       - Action buttons: "Pause Listening", "Open Assistant".
+     - Call `startForeground(SERVICE_ID, notification, FOREGROUND_SERVICE_TYPE_MICROPHONE)`.
+  2. On-Device Keyword Spotting Loop (`ContinuousSpeechRecognizer`):
+     - Instantiate Android's built-in offline `SpeechRecognizer.createSpeechRecognizer(context)`.
+     - Configure `Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)`:
+       - `EXTRA_LANGUAGE_MODEL = LANGUAGE_MODEL_FREE_FORM`.
+       - `EXTRA_PARTIAL_RESULTS = true`.
+       - `EXTRA_PREFER_OFFLINE = true` (ensures 100% offline, zero network traffic).
+     - In `onPartialResults(Bundle)`:
+       - Extract partial text string list.
+       - Match against wake phrases: `"hey assistant"`, `"ok assistant"`, `"assistant"`.
+       - Upon match: trigger `onWakeWordDetected()` event!
+     - In `onEndOfSpeech()` / `onError(int)`:
+       - Automatically restart the recognizer loop with a 200ms debounce to maintain continuous listening without memory leaks.
+  3. Battery Conservation & Voice Activity Detection (VAD):
+     - Check RMS audio level in `onRmsChanged(float rmsdB)`. If ambient noise is below threshold for >30 seconds, drop recognition duty cycle to save battery.
+  4. Expose React Native bridge module `AssistantBackgroundModule`:
+     - Methods: `startBackgroundListener()`, `stopBackgroundListener()`, `isListening()`.
+     - Event emitter: `onWakeWordTriggered`.
+  5. Update `mobile/app.json`:
+     - Ensure permissions are active:
+       - `"android.permission.FOREGROUND_SERVICE"`
+       - `"android.permission.FOREGROUND_SERVICE_MICROPHONE"`
+       - `"android.permission.RECORD_AUDIO"`
+       - `"android.permission.POST_NOTIFICATIONS"`
+       - `"android.permission.RECEIVE_BOOT_COMPLETED"`
+- **Acceptance Criteria & Test Steps:**
+  1. Build and install Android dev client (`npx expo run:android`).
+  2. Enable "Background Assistant" in app settings.
+  3. Minimize the app or press the Home button to return to the Android home screen.
+  4. Verify the persistent notification appears in the notification drawer: *"Routine Assistant Active - Listening hands-free for 'Hey Assistant'"*.
+  5. While on the home screen or inside another app (e.g. Chrome), clearly speak: *"Hey Assistant"*.
+  6. Verify the wake word is detected immediately, indicated by device haptic vibration and chime.
+
+---
+
+### Feature 11.2: System-Wide Overlay Launcher & Background Activity Wake-Up
+**Goal:** When the wake word triggers from the background service, immediately display a floating Siri-style overlay over the active app (or launch the assistant into the foreground) so the user can speak commands without touching the phone.
+
+- **Required Agent Skills:** `expo-overview`, `expo-dev-client`, `expo-module`, `vercel-react-native-skills`, `expo-router`.
+- **100% Free & Zero Credentials Guarantee:** Built on standard Android `WindowManager` (`TYPE_APPLICATION_OVERLAY`) and high-priority Full-Screen PendingIntents. 100% free native OS capability.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Configure `SYSTEM_ALERT_WINDOW` permission:
+     - In `mobile/android/app/src/main/AndroidManifest.xml`:
+       ```xml
+       <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+       ```
+     - Provide a helper in Settings: `checkOverlayPermission()` and `requestOverlayPermission()` that directs the user to Android's "Display over other apps" toggle.
+  2. Create System Overlay View `AssistantFloatingView.kt`:
+     - Using Android `WindowManager`:
+       - Layout params: `TYPE_APPLICATION_OVERLAY`, `FLAG_NOT_TOUCH_MODAL | FLAG_LAYOUT_IN_SCREEN`, `PixelFormat.TRANSLUCENT`.
+       - Gravity: `Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL`.
+     - Inflate a sleek floating pill / glowing orb view directly onto the window manager over any running third-party app.
+     - Displays live pulsing animation and recognized speech text.
+  3. Fallback High-Priority Heads-Up Notification (if overlay permission not yet granted):
+     - Fire a high-priority heads-up notification with a full-screen PendingIntent that immediately brings `MainActivity` to the foreground with route `/assistant?trigger=wake_word`.
+  4. Audio Chime & Seamless Dictation Handoff:
+     - Play a crisp native chime sound (`assistant_wake.wav` from Android `SoundPool`).
+     - Fire medium haptic pulse.
+     - Transition the audio stream directly to the existing speech parsing loop (`POST /routines/parse`) so the user can speak their routine seamlessly: *"Hey Assistant, remind me to pick up groceries at 6 PM"*.
+- **Acceptance Criteria & Test Steps:**
+  1. Grant "Display over other apps" permission in Android settings when prompted.
+  2. Open any external app (such as YouTube or Settings) or stay on the home screen.
+  3. Say *"Hey Assistant"*.
+  4. Verify the floating assistant overlay appears smoothly at the bottom of the screen over the external app.
+  5. Speak: *"Schedule a meeting with Sarah tomorrow at 10 AM"*.
+  6. Verify the audio is captured, processed, confirmed by voice TTS, and the floating overlay dismisses smoothly.
+
+---
+
+### Feature 11.3: Android Default Digital Assistant Role (`AssistIntent`)
+**Goal:** Register Routine Manager as a system-recognized Digital Assistant App on Android, enabling instant activation via hardware gestures (long-pressing the phone's Power button, long-pressing the Home pill, or swiping from the bottom screen corner).
+
+- **Required Agent Skills:** `expo-overview`, `expo-dev-client`, `expo-module`, `vercel-react-native-skills`.
+- **100% Free & Zero Credentials Guarantee:** Standard Android OS framework intent filter (`android.intent.action.ASSIST`). 100% free, zero external services.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Add Assist Intent Filter to `AndroidManifest.xml` via Expo config plugin:
+     ```xml
+     <activity
+         android:name=".MainActivity"
+         android:exported="true"
+         android:launchMode="singleTask">
+         <intent-filter>
+             <action android:name="android.intent.action.ASSIST" />
+             <category android:name="android.intent.category.DEFAULT" />
+         </intent-filter>
+     </activity>
+     ```
+  2. Create Deep Link & Intent Handler in `mobile/src/hooks/use-system-assistant-intent.ts`:
+     - Detect when app is launched via `android.intent.action.ASSIST` or deep-link `routine-manager://assistant?source=hardware_gesture`.
+     - Automatically open the `AssistantOverlay` in active listening mode with instant haptic feedback.
+  3. Create User Setup Guide in `mobile/src/screens/settings/assistant.tsx`:
+     - Add a one-tap settings shortcut button: *"Set as Default Assistant"*.
+     - Opens Android Settings: `startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))`.
+     - Displays visual instructions showing how to select "Routine Manager" as the device default assistant.
+- **Acceptance Criteria & Test Steps:**
+  1. Navigate to Settings -> Assistant in the app.
+  2. Tap *"Set as Default Assistant"* and select "Routine Manager" in the Android system settings.
+  3. Exit the app entirely.
+  4. Long-press the phone's physical Power button (or swipe diagonally from the bottom corner on gesture navigation).
+  5. Verify Routine Manager Assistant opens instantly in listening mode, ready to receive commands.
+
+---
+
+### Feature 11.4: iOS Siri Shortcuts & App Intents Gateway
+**Goal:** Provide full Apple-compliant hands-free voice trigger capabilities for iOS devices via Siri Shortcuts and App Intents without violating Apple's background sandbox or App Store guidelines.
+
+- **Required Agent Skills:** `expo-overview`, `expo-router`, `expo-dev-client`, `vercel-react-native-skills`.
+- **100% Free & Zero Credentials Guarantee:** 100% native iOS Siri Shortcuts framework and custom URL scheme handling. No paid Apple developer services required for local development.
+- **Detailed Step-by-Step Implementation Instructions:**
+  1. Configure iOS URL Scheme and Info.plist in `mobile/app.json`:
+     - Scheme: `"routine-manager"`.
+     - Register `NSUserActivityTypes`: `["com.routinemanager.app.assistant"]`.
+  2. Deep Link Route `mobile/app/assistant.tsx`:
+     - Handle incoming deep links: `routine-manager://assistant?listen=true`.
+     - When received, app immediately opens into full-screen Assistant overlay with microphone active and chime played.
+  3. Siri Shortcuts Integration & Donation:
+     - Create `mobile/src/services/siri-shortcuts.ts`:
+       - Donate user shortcut: *"Routine Assistant"* and *"Schedule Routine"*.
+       - Allows the user to say to Apple Siri: *"Hey Siri, Routine Assistant"* or *"Hey Siri, schedule routine"*.
+     - Siri immediately executes the shortcut and opens Routine Manager directly into active voice listening mode.
+  4. Action Button & Control Center Support:
+     - Document and support assigning the iPhone 15 Pro / 16 Action Button or iOS 18 Control Center Quick Tile to trigger the shortcut with one press.
+- **Acceptance Criteria & Test Steps:**
+  1. Launch the app on an iOS device / simulator.
+  2. Tap "Add to Siri" in Assistant Settings.
+  3. Lock the phone or go to the iOS Home screen.
+  4. Say: *"Hey Siri, Routine Assistant"*.
+  5. Verify Apple Siri hands off execution, opening Routine Manager directly in voice listening mode with the Assistant Orb glowing.
+  6. Speak your routine and verify it parses and schedules automatically.
+
+---
+
+## Master Checklist: Feature Sequence & Verification
+
+| Code | Feature Title | Group | Status |
+| :--- | :--- | :--- | :--- |
+| **10.1** | Floating Glowing Assistant Orb & Fluid Audio Waveform | UI Overhaul | Ready to implement |
+| **10.2** | Modern Glassmorphic Dashboard & Live Routine Progress Rings | UI Overhaul | Ready to implement |
+| **10.3** | Siri-Style Smart Assistant Feedback Sheet & Entity Chips | UI Overhaul | Ready to implement |
+| **10.4** | Cohesive Global Theme, Fluid Micro-Interactions & Elevation Tokens | UI Overhaul | Ready to implement |
+| **11.1** | Native Android Foreground Service & Continuous Wake-Word Engine | True Assistant | Ready to implement |
+| **11.2** | System-Wide Overlay Launcher & Background Activity Wake-Up | True Assistant | Ready to implement |
+| **11.3** | Android Default Digital Assistant Role (`AssistIntent`) | True Assistant | Ready to implement |
+| **11.4** | iOS Siri Shortcuts & App Intents Gateway | True Assistant | Ready to implement |
+
+---
+
 ## Master checklist (tick as you go)
 
 - [x] 0.1 Cursor rule + gate
@@ -1890,12 +2260,20 @@ Assuming work starts from an empty folder mid-week:
 - [x] 6.1b Dev build (if needed)
 - [x] 6.2 Push token register
 - [x] 6.3 Remote push (optional)
-- [ ] 7.1 NL update/delete
+- [x] 7.1 NL update/delete
 - [ ] 8.1 Backend deploy (Render Free)
 - [ ] 8.2 EAS Update
 - [ ] 8.3 Android preview APK
 - [ ] 9.1 Hardening
 - [ ] 9.2 Demo script E2E
+- [ ] 10.1 Assistant Orb & Fluid Audio Waveform
+- [ ] 10.2 Glassmorphic Dashboard & Progress Rings
+- [ ] 10.3 Siri-Style Smart Assistant Feedback Sheet & Entity Chips
+- [ ] 10.4 Cohesive Global Theme, Micro-Interactions & Elevation
+- [ ] 11.1 Native Android Foreground Service & Continuous Wake-Word Engine
+- [ ] 11.2 System-Wide Overlay Launcher & Background Activity Wake-Up
+- [ ] 11.3 Android Default Digital Assistant Role (AssistIntent)
+- [ ] 11.4 iOS Siri Shortcuts & App Intents Gateway
 
 ---
 
